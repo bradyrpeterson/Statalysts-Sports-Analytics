@@ -18,7 +18,7 @@ api_key = os.getenv("API_KEY")
 headers = {"Authorization": f"Bearer {api_key}"}
 
 #Load d1 teams (static roster file, doesn't need refreshing)
-with open("basketball/d1_teams_2025.json", "r") as f:
+with open("basketball/d1_teams_2026.json", "r") as f:
     d1_teams = json.load(f)
 
 needed_cols = ["season","status","startDate","homeTeam","awayTeam","homePoints","awayPoints","homeConference","awayConference","neutralSite"]

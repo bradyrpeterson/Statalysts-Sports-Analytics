@@ -156,12 +156,14 @@ try:
     from basketball import predictor as basketball_predictor
     
     basketball_dir = os.path.join(os.path.dirname(__file__), 'basketball')
-    with open(os.path.join(basketball_dir, "d1_teams_2025.json"), "r") as f:
+    with open(os.path.join(basketball_dir, "d1_teams_2026.json"), "r") as f:
         basketball_teams = json.load(f)
     with open(os.path.join(basketball_dir, "conferences.json"), "r") as f:
         basketball_conferences = json.load(f)
     with open(os.path.join(basketball_dir, "basketball_team_logos.json"), "r") as f:
         basketball_logos = json.load(f)
+    with open(os.path.join(basketball_dir, "team_color.json"), "r") as f:
+        basketball_colors = json.load(f)
     BASKETBALL_AVAILABLE = True
 except Exception as e:
     print(f"Basketball predictor not available: {e}")
@@ -169,6 +171,7 @@ except Exception as e:
     basketball_teams = []
     basketball_conferences = []
     basketball_logos = {}
+    basketball_colors = {}
 
 @app.route("/")
 def index():
@@ -535,13 +538,10 @@ def matchup():
     if BASKETBALL_AVAILABLE:
         try:
             d1 = set(basketball_predictor.d1_teams)
-            # team_color.json is football's file, but it is keyed by school, so a
-            # school that plays both sports gets its real color here. Schools with
-            # no football program fall back to the neutral chart colors.
             sports["basketball"] = [
                 {"name": t,
                  "logo": basketball_logos.get(t, ""),
-                 "color": football_colors.get(t, "")}
+                 "color": basketball_colors.get(t, "")}
                 for t in sorted(basketball_predictor.ratings.index) if t in d1
             ]
         except Exception as e:
