@@ -24,6 +24,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from football import predictor as football_predictor
 
+football_predictor.refresh(force=True)
+
 SEASON = 2025
 
 # (home, away, predicted_side, win_prob, model_margin, closing_spread, actual_side, actual_margin)

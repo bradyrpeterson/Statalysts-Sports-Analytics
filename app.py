@@ -5,6 +5,7 @@ import sys
 import json
 import os
 import threading
+import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -18,6 +19,11 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 # Add both sport folders to Python path
 sys.path.append('./football')
 sys.path.append('./basketball')
+
+#Python block-buffers stdout when it isn't a terminal, so under gunicorn a worker's
+#prints only reached the log when the buffer filled or the worker died -- hours late
+#and out of order with gunicorn's own lines. Flush every line as it's written.
+sys.stdout.reconfigure(line_buffering=True)
 
 app = Flask(__name__)
 
@@ -35,22 +41,55 @@ if not firebase_admin._apps:
 # Initialize Firestore DB
 db = firestore.client()
 
+#How often the background thread re-pulls data and refits both models, and how soon
+#it tries again after a failed pull (an API outage shouldn't leave stale data for an hour).
+DATA_REFRESH_SECONDS = 3600
+DATA_RETRY_SECONDS = 300
+#How long a page waits for the very first load after a deploy or restart before
+#rendering its empty fallback instead.
+DATA_WAIT_SECONDS = 60
+
+_predictors_loaded = threading.Event()
+
+
 def refresh_predictors():
-    """Re-pull data from CFBD/CBBD and retrain both models. Called at the top of
-    every page that shows predictions so the site reflects final scores and new
-    games on every visit instead of only whenever the process last restarted.
-    Each predictor's own refresh() throttles itself, so calling this from
-    multiple routes in the same few seconds is cheap."""
+    """Re-pull data from CFBD/CBBD and retrain both models. Returns True if both
+    loaded cleanly.
+
+    Runs only on the background thread below, never inside a request. It used to be
+    called at the top of every page, so once an hour -- and every time a worker was
+    replaced -- some visitor's request did the whole download and refit, and on
+    Render's small instances that ran past gunicorn's timeout and got the worker killed.
+    """
+    ok = True
     if FOOTBALL_AVAILABLE:
         try:
-            football_predictor.refresh()
+            football_predictor.refresh(force=True)
         except Exception as e:
+            ok = False
             print(f"Error refreshing football predictor: {e}")
     if BASKETBALL_AVAILABLE:
         try:
-            basketball_predictor.refresh()
+            basketball_predictor.refresh(force=True)
         except Exception as e:
+            ok = False
             print(f"Error refreshing basketball predictor: {e}")
+    return ok
+
+
+def _keep_predictors_fresh():
+    while True:
+        ok = refresh_predictors()
+        #Set even after a failed first load so pages fall back to their empty state
+        #rather than waiting on data that isn't coming.
+        _predictors_loaded.set()
+        time.sleep(DATA_REFRESH_SECONDS if ok else DATA_RETRY_SECONDS)
+
+
+def wait_for_predictors():
+    """Hold a request until the first data load has finished (only matters right
+    after a restart). Later refreshes swap data in without blocking anyone."""
+    return _predictors_loaded.wait(timeout=DATA_WAIT_SECONDS)
 
 def current_user_state():
     """(logged_in, email) for the public pages, which render a signed-in header but
@@ -258,6 +297,11 @@ except Exception as e:
     basketball_logos = {}
     basketball_colors = {}
 
+#Loading happens off the startup path: gunicorn kills a worker that takes longer than
+#its timeout to boot, and downloading plus fitting both models can take that long on
+#a small instance.
+threading.Thread(target=_keep_predictors_fresh, daemon=True).start()
+
 @app.route("/")
 def index():
     """Landing page -- one free featured pick, a rankings preview and last week's
@@ -265,10 +309,11 @@ def index():
     user_logged_in, _ = current_user_state()
 
     try:
-        refresh_predictors()
+        wait_for_predictors()
 
         basketball_preds = basketball_predictor.get_upcoming_predictions()
-        football_preds = football_predictor.get_upcoming_predictions()
+        #Current week only -- betting lines exist for nothing past it anyway.
+        football_preds = football_predictor.get_upcoming_predictions(week=football_predictor.next_week)
 
         #Basketball gets first refusal on the featured slot, at a higher bar than
         #football: its lines move less, so a 3-point disagreement means less there.
@@ -314,7 +359,7 @@ def index():
 def football():
     """Football predictions page (LOGIN REQUIRED)"""
     try:
-        refresh_predictors()
+        wait_for_predictors()
 
         week = request.args.get("week", str(football_predictor.next_week))
         conference = request.args.get("conference", "All")
@@ -348,7 +393,7 @@ def football():
         return render_template('football.html',
                              predictions=[],
                              conferences=football_conferences,
-                             selected_week=str(football_predictor.next_week) if FOOTBALL_AVAILABLE else "1",
+                             selected_week=str(getattr(football_predictor, 'next_week', 1)) if FOOTBALL_AVAILABLE else "1",
                              selected_conference="All",
                              team_logos=football_logos,
                              team_colors=football_colors,
@@ -360,7 +405,7 @@ def football():
 def basketball():
     """Basketball predictions page (LOGIN REQUIRED)"""
     try:
-        refresh_predictors()
+        wait_for_predictors()
 
         conference = request.args.get("conference", "All")
         predictions_df = basketball_predictor.get_upcoming_predictions(
@@ -384,7 +429,7 @@ def basketball():
 def rankings():
     """Rankings page (LOGIN REQUIRED)"""
     try:
-        refresh_predictors()
+        wait_for_predictors()
 
         football_rankings = football_predictor.FBS_rankings.head(25).to_dict('records')
         basketball_rankings = basketball_predictor.D1_rankings.head(25).to_dict('records')
@@ -440,7 +485,7 @@ def matchup():
     """Unified matchup predictor -- pick a sport, pick two teams, get a number.
     Replaces the old /football/custom and /basketball/custom pages, which now
     redirect here."""
-    refresh_predictors()
+    wait_for_predictors()
 
     sports = {}
     if FOOTBALL_AVAILABLE:
@@ -599,6 +644,9 @@ def _run_tracking_job_if_missed():
     run on startup closes that window.
     """
     try:
+        #Snapshotting reads the models, so a catch-up that ran before they loaded would
+        #save nothing and still mark the day as done.
+        _predictors_loaded.wait()
         now = _tracking_today()
         if now.hour < TRACKING_JOB_HOUR:
             return  # today's run hasn't come due yet

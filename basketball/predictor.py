@@ -23,12 +23,27 @@ with open("basketball/d1_teams_2026.json", "r") as f:
 needed_cols = ["season","status","startDate","homeTeam","awayTeam","homePoints","awayPoints","homeConference","awayConference","neutralSite"]
 useful = ["team", "off_eff", "def_eff", "tov_rate"]
 
-#Don't hit the CBBD API more than once per this many seconds -- refresh() is
-#called at the top of every page load (see app.py) so the site never shows
-#stale ratings without a redeploy, but a burst of page views (or one visitor
-#clicking between pages) shouldn't turn into a burst of redundant API calls.
+#Don't hit the CBBD API more than once per this many seconds unless forced.
+#app.py refreshes on a background thread (forced, hourly); the throttle is for
+#anything else that calls refresh() casually.
 MIN_REFRESH_INTERVAL_SECONDS = 3600
 _last_refresh_time = 0.0
+
+#Every CBBD call gives up after this long, so one slow response can't hang a request.
+HTTP_TIMEOUT_SECONDS = 30
+
+#Today's games and lines, keyed by the Eastern date so a new day starts a new entry
+#on its own. Emptied on every data refresh, so page views reuse at most an hour-old copy
+#instead of each making two API calls.
+_daily_cache = {}
+
+
+def _cached_for_today(name, fetch):
+    today = datetime.now(pytz.timezone('America/New_York')).date().isoformat()
+    key = (today, name)
+    if key not in _daily_cache:
+        _daily_cache[key] = fetch()
+    return _daily_cache[key]
 
 
 def train_prediction_model(completed, ratings, stats_clean):
@@ -109,7 +124,7 @@ def load_data():
     #Have to use requests since no python library for CBBD yet
     games_url = "https://api.collegebasketballdata.com/games?season=2026"
     #Convert the API response into a json then a dataframe for easy use
-    games_response = requests.get(games_url, headers=headers)
+    games_response = requests.get(games_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
     games_data = games_response.json()
     games_df = pd.DataFrame(games_data)
     games_df = games_df[needed_cols].copy()
@@ -130,7 +145,7 @@ def load_data():
     #Using requests pull all the statistical data from the data set
     stats_url = "https://api.collegebasketballdata.com/stats/team/season?season=2026"
     #Convert the API response into a json then a dataframe for easy use
-    stats_response = requests.get(stats_url, headers=headers)
+    stats_response = requests.get(stats_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
     stats_data = stats_response.json()
     stats_df = pd.DataFrame(stats_data)
     team_stats = pd.json_normalize(stats_df["teamStats"])
@@ -207,18 +222,17 @@ def load_data():
         "home_court": home_court,
         "D1_rankings": D1_rankings,
         "prediction_model": prediction_model,
+        "_daily_cache": {},
     }
 
 
 def refresh(force=False):
     """Re-fetch everything from CBBD and retrain the model, replacing this
-    module's data in place. Call this before serving any page (see app.py)
-    so the site always reflects current ratings/results instead of whatever
-    was live when the process last started -- no redeploy required.
+    module's data in place, so the site reflects current ratings and results
+    without a redeploy. app.py runs this on a background thread.
 
-    Throttled to once every MIN_REFRESH_INTERVAL_SECONDS so back-to-back page
-    loads (or several visitors at once) don't turn into a burst of redundant
-    CBBD calls; pass force=True to bypass that (e.g. an admin refresh button)."""
+    Throttled to once every MIN_REFRESH_INTERVAL_SECONDS; pass force=True to
+    bypass that."""
     global _last_refresh_time
     now = time.monotonic()
     if not force and (now - _last_refresh_time) < MIN_REFRESH_INTERVAL_SECONDS:
@@ -227,10 +241,9 @@ def refresh(force=False):
     _last_refresh_time = now
 
 
-# Load data once at import so the module works even if nobody calls refresh()
-# (e.g. a script importing this directly). app.py calls refresh() again at
-# the top of every request.
-refresh(force=True)
+# Nothing loads at import. Loading takes long enough that doing it while gunicorn
+# booted a worker could get the worker killed, so app.py loads on a background
+# thread, and scripts call refresh(force=True) themselves.
 
 
 #Prediction function - EXACTLY LIKE FOOTBALL
@@ -295,7 +308,7 @@ def get_betting_lines(season=2026):
     lines_url = f"https://api.collegebasketballdata.com/lines?season={season}&startDateRange={start_date}&endDateRange={end_date}"
 
     try:
-        response = requests.get(lines_url, headers=headers)
+        response = requests.get(lines_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
         response.raise_for_status()
         lines_data = response.json()
 
@@ -370,13 +383,16 @@ def get_upcoming_predictions(conference=None):
     # Fetch today's games directly from API
     games_url = f"https://api.collegebasketballdata.com/games?season=2026&startDateRange={start_date_str}&endDateRange={end_date_str}"
 
-    print("[get_upcoming_predictions] Fetching today's games from API")
-    print(f"  Date range: {start_date_str} to {end_date_str}")
+    def fetch_todays_games():
+        print("[get_upcoming_predictions] Fetching today's games from API")
+        print(f"  Date range: {start_date_str} to {end_date_str}")
+        response = requests.get(games_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return response.json()
 
     try:
-        response = requests.get(games_url, headers=headers)
-        response.raise_for_status()
-        todays_games_data = response.json()
+        #A failed fetch raises before anything is cached, so the next page view retries.
+        todays_games_data = _cached_for_today("games", fetch_todays_games)
         todays_games = pd.DataFrame(todays_games_data)
 
         print(f"  API returned: {len(todays_games)} games")
@@ -419,7 +435,7 @@ def get_upcoming_predictions(conference=None):
         ]
 
     # Fetch betting lines for today
-    betting_lines = get_betting_lines(season=2026)
+    betting_lines = _cached_for_today("lines", lambda: get_betting_lines(season=2026))
 
     predictions = []
     for _, game in games_to_predict.iterrows():

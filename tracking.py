@@ -29,6 +29,10 @@ RECOMMENDED_MIN_EDGE = 5
 #and each game gets recorded against the line and the model that were live that week.
 SNAPSHOT_HORIZON_DAYS = 7
 
+#A pick still pending this many days after its game date was postponed or cancelled.
+#It stops holding its week back from the results panel (see get_recent_results).
+STALE_PENDING_DAYS = 3
+
 #The lower threshold the site flags at. Games between the two thresholds are graded
 #into their own bucket by get_track_record (the "yellow_*" keys) so the two tiers can
 #be compared later without mixing the weaker one into the headline record.
@@ -81,7 +85,8 @@ def _basketball_season_for_date(date_str):
 
 
 def _football_finals_for_season(headers, season):
-    """Every finished game in a season, as {(date, home, away): (home_pts, away_pts)}.
+    """Every finished game in a season, keyed two ways -- by (season_type, week, home,
+    away) and by (date, home, away) -- to (home_pts, away_pts).
 
     One request covers the whole season. The previous version fetched per pick,
     which meant one HTTP call for every pending game and reliably tripped CFBD's
@@ -95,9 +100,22 @@ def _football_finals_for_season(headers, season):
         home_points, away_points = game.get("homePoints"), game.get("awayPoints")
         if home_points is None or away_points is None:
             continue  # not played yet
-        date_str = (game.get("startDate") or "")[:10]
-        finals[(date_str, game.get("homeTeam"), game.get("awayTeam"))] = (home_points, away_points)
+        home, away, score = game.get("homeTeam"), game.get("awayTeam"), (home_points, away_points)
+        finals[(game.get("seasonType"), game.get("week"), home, away)] = score
+        finals[((game.get("startDate") or "")[:10], home, away)] = score
     return finals
+
+
+def _football_final_for_pick(finals, pick):
+    """Look a pick's result up by week first. The UTC date it was snapshotted with
+    goes stale if CFBD moves the kickoff across midnight UTC (a TBD game later slotted
+    at night, say), and a pick keyed only by that date would never settle. Picks
+    imported before the week field existed still fall back to the date."""
+    if pick.get("week") is not None:
+        result = finals.get((pick.get("season_type") or "regular", pick["week"], pick["home"], pick["away"]))
+        if result is not None:
+            return result
+    return finals.get((pick["date"], pick["home"], pick["away"]))
 
 
 def _basketball_finals_for_date(headers, date_str):
@@ -236,7 +254,7 @@ def settle_pending_picks(db, football_predictor=None, basketball_predictor=None)
 
     for doc, data in due:
         if data["sport"] == "football":
-            result = football_finals.get((data["date"], data["home"], data["away"]))
+            result = _football_final_for_pick(football_finals, data)
         else:
             result = basketball_finals.get(data["date"], {}).get((data["home"], data["away"]))
 
@@ -307,7 +325,15 @@ def get_recent_results(db, sport=None, limit=None, min_edge=FLAGGED_MIN_EDGE):
 
     all_picks = [d.to_dict() for d in query.stream()]
     #Slates with a game still to come are held back until the rest of the week lands.
-    unfinished = {_slate_key(p) for p in all_picks if p.get("status") != "final"}
+    #A game that never finishes (postponed, cancelled) stops counting after a few days;
+    #otherwise it hid its entire week and the panel fell back to the week before.
+    stale_before = (
+        datetime.now(pytz.timezone("America/New_York")).date() - timedelta(days=STALE_PENDING_DAYS)
+    ).isoformat()
+    unfinished = {
+        _slate_key(p) for p in all_picks
+        if p.get("status") != "final" and (p.get("date") or "") >= stale_before
+    }
 
     picks = [
         p for p in all_picks

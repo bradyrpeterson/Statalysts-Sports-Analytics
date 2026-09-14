@@ -31,6 +31,8 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 
 from football import predictor as fp
 
+fp.refresh(force=True)
+
 SEASON = 2026
 
 

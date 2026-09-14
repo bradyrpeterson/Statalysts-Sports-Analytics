@@ -70,12 +70,25 @@ HOME_FIELD_ADVANTAGE = 2.5
 #publishing even though the predictions are.
 MODEL_FULLY_TRAINED_MIN_WEEKS = 4
 
-#Don't hit the CFBD API more than once per this many seconds -- refresh() is
-#called at the top of every page load (see app.py) so the site never shows
-#stale scores without a redeploy, but a burst of page views (or one visitor
-#clicking between pages) shouldn't turn into a burst of redundant API calls.
+#Don't hit the CFBD API more than once per this many seconds unless forced.
+#app.py refreshes on a background thread (forced, hourly); the throttle is for
+#anything else that calls refresh() casually.
 MIN_REFRESH_INTERVAL_SECONDS = 3600
 _last_refresh_time = 0.0
+
+#Every CFBD call gives up after this long. Without a timeout a single slow
+#response hung whatever was waiting on it indefinitely -- inside a page request,
+#that was a gunicorn WORKER TIMEOUT.
+HTTP_TIMEOUT_SECONDS = 30
+
+#An unplayed game that kicked off more than this many days ago was postponed or
+#cancelled, not upcoming. Without this cut one such game held next_week on its
+#week for the rest of the season.
+STALE_UNPLAYED_GAME_DAYS = 3
+
+#Betting lines per (week, season_type), fetched once and then reused until the next
+#data refresh empties it -- page views no longer each make their own CFBD call.
+_lines_cache = {}
 
 
 def _fit_team_ratings(games_df):
@@ -161,11 +174,11 @@ def load_data():
     instead of only on process start."""
     with cfbd.ApiClient(configuration) as api_client:
         api_instance = cfbd.GamesApi(api_client)
-        games = api_instance.get_games(year=2026)
+        games = api_instance.get_games(year=2026, _request_timeout=HTTP_TIMEOUT_SECONDS)
 
         venues_api = cfbd.VenuesApi(api_client)
         try:
-            venues = venues_api.get_venues()
+            venues = venues_api.get_venues(_request_timeout=HTTP_TIMEOUT_SECONDS)
         except Exception as e:
             print(f"Error fetching venues: {e}")
             venues = []
@@ -174,7 +187,7 @@ def load_data():
         #before many/any games are played, it *is* the preseason projection. Used
         #below as half of the preseason prior for team ratings.
         try:
-            sp_plus = cfbd.RatingsApi(api_client).get_sp(year=2026)
+            sp_plus = cfbd.RatingsApi(api_client).get_sp(year=2026, _request_timeout=HTTP_TIMEOUT_SECONDS)
         except Exception as e:
             print(f"Error fetching SP+ ratings: {e}")
             sp_plus = []
@@ -182,8 +195,11 @@ def load_data():
         #Last season's own completed games -- the other half of the preseason
         #prior (see PRESEASON PRIOR at the top of this file).
         try:
-            last_season_games = cfbd.GamesApi(api_client).get_games(year=2025)
-            last_season_fbs = [t.school for t in cfbd.TeamsApi(api_client).get_fbs_teams(year=2025)]
+            last_season_games = cfbd.GamesApi(api_client).get_games(year=2025, _request_timeout=HTTP_TIMEOUT_SECONDS)
+            last_season_fbs = [
+                t.school for t in
+                cfbd.TeamsApi(api_client).get_fbs_teams(year=2025, _request_timeout=HTTP_TIMEOUT_SECONDS)
+            ]
         except Exception as e:
             print(f"Error fetching last season's games: {e}")
             last_season_games, last_season_fbs = [], []
@@ -208,6 +224,9 @@ def load_data():
     completed = df.dropna(subset=["homePoints", "awayPoints"]).reset_index(drop=True)
     upcoming = df[df["homePoints"].isna() | df["awayPoints"].isna()].reset_index(drop=True)
     regular_upcoming = upcoming[upcoming["seasonType"] == "regular"]
+    kickoff = pd.to_datetime(regular_upcoming["startDate"], utc=True, errors="coerce")
+    stale_cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=STALE_UNPLAYED_GAME_DAYS)
+    regular_upcoming = regular_upcoming[~(kickoff < stale_cutoff)]
 
     if len(regular_upcoming) > 0:
         next_week = int(regular_upcoming["week"].dropna().sort_values().unique()[0])
@@ -272,18 +291,18 @@ def load_data():
         "FBS_rankings": FBS_rankings,
         "weeks_completed": weeks_completed,
         "model_fully_trained": model_fully_trained,
+        #Lines move through the week, so the cache starts over with each refresh.
+        "_lines_cache": {},
     }
 
 
 def refresh(force=False):
     """Re-fetch everything from CFBD and retrain the model, replacing this
-    module's data in place. Call this before serving any page (see app.py)
-    so the site always reflects the current games/scores instead of whatever
-    was live when the process last started -- no redeploy required.
+    module's data in place, so the site reflects current games and scores
+    without a redeploy. app.py runs this on a background thread.
 
-    Throttled to once every MIN_REFRESH_INTERVAL_SECONDS so back-to-back page
-    loads (or several visitors at once) don't turn into a burst of redundant
-    CFBD calls; pass force=True to bypass that (e.g. an admin refresh button)."""
+    Throttled to once every MIN_REFRESH_INTERVAL_SECONDS; pass force=True to
+    bypass that."""
     global _last_refresh_time
     now = time.monotonic()
     if not force and (now - _last_refresh_time) < MIN_REFRESH_INTERVAL_SECONDS:
@@ -292,10 +311,9 @@ def refresh(force=False):
     _last_refresh_time = now
 
 
-# Load data once at import so the module works even if nobody calls refresh()
-# (e.g. a script importing this directly). app.py calls refresh() again at
-# the top of every request.
-refresh(force=True)
+# Nothing loads at import. Loading takes long enough that doing it while gunicorn
+# booted a worker could get the worker killed, so app.py loads on a background
+# thread, and scripts call refresh(force=True) themselves.
 
 
 def ratings_as_of(week):
@@ -336,6 +354,18 @@ def predict_game(home, away, neutral_site=False):
     return margin, prob
 
 def get_betting_lines(week, year=2026, season_type="regular"):
+    """DraftKings spreads for one week, served from _lines_cache after the first fetch."""
+    key = (year, season_type, None if season_type == "postseason" else week)
+    if key not in _lines_cache:
+        lines = _fetch_betting_lines(week, year, season_type)
+        #A failed fetch returns {}; don't cache that, so the next page view retries.
+        if lines:
+            _lines_cache[key] = lines
+        return lines
+    return _lines_cache[key]
+
+
+def _fetch_betting_lines(week, year, season_type):
    #Get draftkings specific betting lines for the week
     if season_type == "postseason":
         # Postseason doesn't use week numbers
@@ -344,7 +374,7 @@ def get_betting_lines(week, year=2026, season_type="regular"):
         lines_url = f"https://api.collegefootballdata.com/lines?year={year}&week={week}&seasonType=regular"
 
     try:
-        response = requests.get(lines_url, headers=headers)
+        response = requests.get(lines_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
         response.raise_for_status()
         lines_data = response.json()
 
