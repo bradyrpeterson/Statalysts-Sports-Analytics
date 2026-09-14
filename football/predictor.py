@@ -102,10 +102,12 @@ def _fit_team_ratings(games_df):
     teams_in = sorted(set(games_df["homeTeam"]).union(games_df["awayTeam"]))
     #Home teams get a +1 value and -1 is for away
     #This setup allows for the regression to assign each team a numeric rating
-    X = pd.DataFrame(0, index=np.arange(len(games_df)), columns=teams_in)
-    for i, row in games_df.reset_index(drop=True).iterrows():
-        X.loc[i, row["homeTeam"]] = 1    # +1 for home team
-        X.loc[i, row["awayTeam"]] = -1   # -1 for away team
+    team_col = {t: i for i, t in enumerate(teams_in)}
+    rows = np.arange(len(games_df))
+    matrix = np.zeros((len(games_df), len(teams_in)), dtype=np.int64)
+    matrix[rows, games_df["homeTeam"].map(team_col).to_numpy()] = 1    # +1 for home team
+    matrix[rows, games_df["awayTeam"].map(team_col).to_numpy()] = -1   # -1 for away team
+    X = pd.DataFrame(matrix, columns=teams_in)
 
     #Add home field column
     X["home_field"] = 1
