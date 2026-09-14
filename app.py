@@ -380,11 +380,11 @@ def index():
             traceback.print_exc()
         return render_template('index.html',
                              recent_results=recent_results,
-                             team_logos={},
+                             team_logos=football_logos,
                              featured_pick=None,
                              football_top10=[],
                              basketball_top10=[],
-                             basketball_logos={},
+                             basketball_logos=basketball_logos,
                              user_logged_in=user_logged_in,
                              highlights=MODEL_HIGHLIGHTS,
                              football_model_fully_trained=getattr(football_predictor, 'model_fully_trained', True) if FOOTBALL_AVAILABLE else True)
