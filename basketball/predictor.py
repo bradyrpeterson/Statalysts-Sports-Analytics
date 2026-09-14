@@ -53,56 +53,42 @@ def train_prediction_model(completed, ratings, stats_clean):
     latest results.
     """
 
-    features = []
-    targets = []
+    #Built column-wise rather than game by game. The loop this replaces filtered the
+    #stats table twice per game, which was most of a refresh's CPU time -- fine on a
+    #laptop, but minutes on a small Render instance.
+    #Like the old .iloc[0] lookup, a team listed twice in the stats uses its first row.
+    stats = stats_clean.drop_duplicates("team").set_index("team")[["off_eff", "def_eff", "tov_rate"]]
 
-    for _, game in completed.iterrows():
-        home = game['homeTeam']
-        away = game['awayTeam']
-        margin = game['margin']
-        neutral = game.get('neutralSite', False)
+    # Skip games missing a rating or stats for either team
+    games = completed[
+        completed["homeTeam"].isin(ratings.index) & completed["awayTeam"].isin(ratings.index)
+        & completed["homeTeam"].isin(stats.index) & completed["awayTeam"].isin(stats.index)
+    ]
 
-        # Skip if missing data
-        if home not in ratings.index or away not in ratings.index:
-            continue
-        if home not in stats_clean['team'].values or away not in stats_clean['team'].values:
-            continue
+    h_stats = stats.loc[games["homeTeam"]].to_numpy(dtype=float)
+    a_stats = stats.loc[games["awayTeam"]].to_numpy(dtype=float)
+    home_rating = ratings.loc[games["homeTeam"]].to_numpy(dtype=float)
+    away_rating = ratings.loc[games["awayTeam"]].to_numpy(dtype=float)
+    #bool() per value, as the old `0 if neutral else 1` did -- a missing flag stored as
+    #NaN counts as neutral, one stored as None does not.
+    hc = np.where(games["neutralSite"].map(bool).to_numpy(), 0.0, 1.0)
 
-        # Get features
-        h_stats = stats_clean[stats_clean['team'] == home].iloc[0]
-        a_stats = stats_clean[stats_clean['team'] == away].iloc[0]
+    X = np.column_stack([
+        home_rating - away_rating,          # rating_diff
+        h_stats[:, 0] - a_stats[:, 0],      # oeff_diff
+        h_stats[:, 1] - a_stats[:, 1],      # deff_diff
+        h_stats[:, 2] - a_stats[:, 2],      # tov_diff
+        hc,
+        home_rating,
+        away_rating,
+        h_stats[:, 0],                      # home off_eff
+        a_stats[:, 0],                      # away off_eff
+        h_stats[:, 1],                      # home def_eff
+        a_stats[:, 1],                      # away def_eff
+    ])
+    y = games["margin"].to_numpy(dtype=float)
 
-        rating_diff = ratings[home] - ratings[away]
-        oeff_diff = h_stats['off_eff'] - a_stats['off_eff']
-        deff_diff = h_stats['def_eff'] - a_stats['def_eff']
-        tov_diff = h_stats['tov_rate'] - a_stats['tov_rate']
-        hc = 0 if neutral else 1
-
-        # Skip if NaN
-        if pd.isna([rating_diff, oeff_diff, deff_diff, tov_diff]).any():
-            continue
-
-        feature_vector = [
-            rating_diff,
-            oeff_diff,
-            deff_diff,
-            tov_diff,
-            hc,
-            ratings[home],
-            ratings[away],
-            h_stats['off_eff'],
-            a_stats['off_eff'],
-            h_stats['def_eff'],
-            a_stats['def_eff']
-        ]
-
-        features.append(feature_vector)
-        targets.append(margin)
-
-    X = np.array(features)
-    y = np.array(targets)
-
-    # Remove any NaN rows (safety check)
+    # Remove any NaN rows
     nan_mask = np.isnan(X).any(axis=1)
     if nan_mask.sum() > 0:
         X = X[~nan_mask]
@@ -125,6 +111,7 @@ def load_data():
     games_url = "https://api.collegebasketballdata.com/games?season=2026"
     #Convert the API response into a json then a dataframe for easy use
     games_response = requests.get(games_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
+    games_response.raise_for_status()
     games_data = games_response.json()
     games_df = pd.DataFrame(games_data)
     games_df = games_df[needed_cols].copy()
@@ -146,6 +133,7 @@ def load_data():
     stats_url = "https://api.collegebasketballdata.com/stats/team/season?season=2026"
     #Convert the API response into a json then a dataframe for easy use
     stats_response = requests.get(stats_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
+    stats_response.raise_for_status()
     stats_data = stats_response.json()
     stats_df = pd.DataFrame(stats_data)
     team_stats = pd.json_normalize(stats_df["teamStats"])
@@ -178,10 +166,12 @@ def load_data():
     teams = sorted(set(df["homeTeam"]).union(df["awayTeam"]))
     #Home teams get a +1 value and -1 is for away
     #This setup allows for the regression to assign each team a numeric rating
-    X = pd.DataFrame(0, index=np.arange(len(df)), columns=teams)
-    for i, row in df.iterrows():
-        X.loc[i, row["homeTeam"]] = 1    # +1 for home team
-        X.loc[i, row["awayTeam"]] = -1   # -1 for away team
+    team_col = {t: i for i, t in enumerate(teams)}
+    rows = np.arange(len(df))
+    matrix = np.zeros((len(df), len(teams)), dtype=np.int64)
+    matrix[rows, df["homeTeam"].map(team_col).to_numpy()] = 1    # +1 for home team
+    matrix[rows, df["awayTeam"].map(team_col).to_numpy()] = -1   # -1 for away team
+    X = pd.DataFrame(matrix, columns=teams)
 
     #Add home court column
     X["home_court"] = 1
