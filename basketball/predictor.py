@@ -5,10 +5,9 @@ import requests
 import json
 import time
 from sklearn.linear_model import LinearRegression
-import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 import pytz
 
 load_dotenv()
@@ -371,7 +370,7 @@ def get_upcoming_predictions(conference=None):
     # Fetch today's games directly from API
     games_url = f"https://api.collegebasketballdata.com/games?season=2026&startDateRange={start_date_str}&endDateRange={end_date_str}"
 
-    print(f"[get_upcoming_predictions] Fetching today's games from API")
+    print("[get_upcoming_predictions] Fetching today's games from API")
     print(f"  Date range: {start_date_str} to {end_date_str}")
 
     try:
@@ -383,7 +382,7 @@ def get_upcoming_predictions(conference=None):
         print(f"  API returned: {len(todays_games)} games")
 
         if len(todays_games) == 0:
-            print(f"  No games scheduled for today")
+            print("  No games scheduled for today")
             return pd.DataFrame()
 
         # Filter for D1 teams

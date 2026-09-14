@@ -9,7 +9,7 @@ import os
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LinearRegression, BayesianRidge, RidgeCV
+from sklearn.linear_model import LinearRegression, RidgeCV
 from sklearn.ensemble import GradientBoostingRegressor
 
 HERE = os.path.dirname(os.path.abspath(__file__))

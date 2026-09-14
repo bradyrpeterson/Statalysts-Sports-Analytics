@@ -5,7 +5,6 @@ Firestore collection: tracked_picks
 Doc id: {sport}_{date}_{home}_{away}  (deterministic -> idempotent snapshotting)
 """
 import math
-import os
 from datetime import datetime, timedelta, timezone
 
 import requests

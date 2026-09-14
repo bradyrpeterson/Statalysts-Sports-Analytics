@@ -118,8 +118,7 @@ def build_doc(week, home, away, pred_side, win_prob, model_margin, closing_sprea
         print(f"  WARNING: could not confirm {home} vs {away} (week {week}) against real game data -- skipping")
         return None
 
-    real_home, real_away = real_game["homeTeam"], real_game["awayTeam"]
-    swapped = real_home != home  # our "home" guess from the "@ " parsing didn't match the API
+    swapped = real_game["homeTeam"] != home  # our "home" guess from the "@ " parsing didn't match the API
 
     if swapped:
         home, away = away, home

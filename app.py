@@ -1,19 +1,19 @@
-# app.py - COMPLETELY FIXED VERSION
-# Unified Flask app for Football and Basketball predictors
+# Unified Flask app for the football and basketball predictors.
 
 from flask import Flask, render_template, request, url_for, session, redirect, jsonify
 import sys
 import json
 import os
-import pandas as pd
-import numpy as np
-from functools import wraps
-import firebase_admin
-from firebase_admin import credentials, firestore, auth
-from google.cloud.firestore_v1.base_query import FieldFilter
-from datetime import datetime, timezone
 import threading
+import traceback
+from datetime import datetime, timedelta, timezone
+from functools import wraps
+
+import pandas as pd
 import pytz
+import firebase_admin
+from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 # Add both sport folders to Python path
 sys.path.append('./football')
@@ -52,6 +52,90 @@ def refresh_predictors():
         except Exception as e:
             print(f"Error refreshing basketball predictor: {e}")
 
+def current_user_state():
+    """(logged_in, email) for the public pages, which render a signed-in header but
+    do not require an account. Every public route needs the same two values."""
+    user_logged_in = False
+    if 'user_id' in session:
+        try:
+            user_doc = db.collection("users").document(session["user_id"]).get()
+            if user_doc.exists:
+                user_logged_in = user_doc.to_dict().get("status") == "active"
+        except Exception as e:
+            print(f"Error reading user state: {e}")
+    return user_logged_in, session.get('email')
+
+
+def clean_predictions(predictions_df):
+    """Turn a predictions frame into template-ready rows.
+
+    Probabilities arrive either as a fraction or already as a percentage depending on
+    the predictor, and pandas stores a missing betting line as NaN, which Jinja renders
+    as the string "nan" instead of falling through its `is not none` checks.
+    """
+    if len(predictions_df) == 0:
+        return []
+
+    predictions_df = predictions_df.copy()
+    if predictions_df['prob'].iloc[0] <= 1:
+        predictions_df['prob'] = predictions_df['prob'] * 100
+    predictions_df['margin'] = predictions_df['margin'].round(1)
+    for column in ('betting_spread', 'spread_diff'):
+        predictions_df[column] = predictions_df[column].apply(
+            lambda x: None if pd.isna(x) else x
+        )
+    return predictions_df.to_dict('records')
+
+
+def conference_options(predictor, fallback):
+    """Conferences seen in this season's completed games, or the static list if the
+    predictor has not loaded any."""
+    try:
+        return sorted(set(
+            list(predictor.completed['homeConference'].unique()) +
+            list(predictor.completed['awayConference'].unique())
+        ))
+    except Exception:
+        return fallback or []
+
+
+def featured_pick_from(predictions_df, sport, min_edge):
+    """The single biggest disagreement with the market, if it clears min_edge.
+
+    The homepage shows one free pick; both sports pick theirs the same way and differ
+    only in the threshold they have to clear.
+    """
+    if len(predictions_df) == 0:
+        return None
+
+    best = predictions_df.assign(
+        abs_spread_diff=predictions_df['spread_diff'].abs()
+    ).nlargest(1, 'abs_spread_diff')
+    if len(best) == 0:
+        return None
+
+    pick = best.iloc[0]
+    spread_diff = pick.get('spread_diff')
+    if spread_diff is None or pd.isna(spread_diff) or abs(float(spread_diff)) < min_edge:
+        return None
+
+    prob = float(pick['prob'])
+    if prob <= 1:
+        prob *= 100
+    return {
+        'sport': sport,
+        'home': pick['home'],
+        'away': pick['away'],
+        'predicted_winner': pick['predicted_winner'],
+        'margin': round(float(pick['margin']), 1),
+        'prob': round(prob, 1),
+        'betting_spread': None if pd.isna(pick.get('betting_spread')) else pick.get('betting_spread'),
+        'edge': round(abs(float(spread_diff)), 1),
+        'edge_class': pick.get('edge_class', ''),
+        'neutral_site': pick.get('neutral_site', False),
+    }
+
+
 def login_required(f):
     """Gate on having an account only. The paid-tier gate (subscription status/expiration
     checks) is dormant while access is free -- see /auth-callback, which now marks every
@@ -71,7 +155,6 @@ def login_required(f):
 
         except Exception as e:
             print(f"Error in login_required: {e}")
-            import traceback
             traceback.print_exc()
             return redirect(url_for('login'))
     return decorated_function
@@ -177,104 +260,24 @@ except Exception as e:
 
 @app.route("/")
 def index():
-    """Landing page - shows featured pick and top 5 rankings preview (PUBLIC)"""
-    # Check if user is logged in
-    user_logged_in = False
-    if 'user_id' in session:
-        try:
-            user_doc = db.collection("users").document(session["user_id"]).get()
-            if user_doc.exists:
-                user_logged_in = user_doc.to_dict().get("status") == "active"
-        except:
-            pass
-    user_email = session.get('email', None)
+    """Landing page -- one free featured pick, a rankings preview and last week's
+    graded results (PUBLIC)."""
+    user_logged_in, _ = current_user_state()
 
     try:
         refresh_predictors()
 
-        # Get today's basketball games
         basketball_preds = basketball_predictor.get_upcoming_predictions()
-        
-        # Get this week's football games  
         football_preds = football_predictor.get_upcoming_predictions()
-        
-        # Find the best pick (highest edge) from either sport
-        featured_pick = None
-        
-        # Check basketball for high-edge games
-        if len(basketball_preds) > 0:
-            basketball_preds['abs_spread_diff'] = basketball_preds['spread_diff'].abs()
-            best_bball = basketball_preds.nlargest(1, 'abs_spread_diff')
-            if len(best_bball) > 0:
-                pick = best_bball.iloc[0]
-                if pick.get('spread_diff') is not None and not pd.isna(pick['spread_diff']) and abs(float(pick['spread_diff'])) >= 5:
-                    # Check if prob is already a percentage (>1) or decimal (0-1)
-                    prob_value = float(pick['prob'])
-                    if prob_value <= 1:
-                        prob_value = prob_value * 100  # Convert from decimal to percentage
-                    
-                    # Handle betting_spread NaN
-                    betting_spread_value = None if pd.isna(pick.get('betting_spread')) else pick.get('betting_spread')
-                    
-                    featured_pick = {
-                        'sport': 'basketball',
-                        'home': pick['home'],
-                        'away': pick['away'],
-                        'predicted_winner': pick['predicted_winner'],
-                        'margin': round(float(pick['margin']), 1),
-                        'prob': round(prob_value, 1),
-                        'betting_spread': betting_spread_value,
-                        'edge': round(abs(float(pick['spread_diff'])), 1),
-                        'edge_class': pick.get('edge_class', ''),
-                        'neutral_site': pick.get('neutral_site', False)
-                    }
-        
-        # Check football if no basketball pick
-        if not featured_pick and len(football_preds) > 0:
-            football_preds['abs_spread_diff'] = football_preds['spread_diff'].abs()
-            best_football = football_preds.nlargest(1, 'abs_spread_diff')
-            if len(best_football) > 0:
-                pick = best_football.iloc[0]
-                if pick.get('spread_diff') is not None and not pd.isna(pick['spread_diff']) and abs(float(pick['spread_diff'])) >= 3:
-                    # Check if prob is already a percentage (>1) or decimal (0-1)
-                    prob_value = float(pick['prob'])
-                    if prob_value <= 1:
-                        prob_value = prob_value * 100  # Convert from decimal to percentage
-                    
-                    # Handle betting_spread NaN
-                    betting_spread_value = None if pd.isna(pick.get('betting_spread')) else pick.get('betting_spread')
-                    
-                    featured_pick = {
-                        'sport': 'football',
-                        'home': pick['home'],
-                        'away': pick['away'],
-                        'predicted_winner': pick['predicted_winner'],
-                        'margin': round(float(pick['margin']), 1),
-                        'prob': round(prob_value, 1),
-                        'betting_spread': betting_spread_value,
-                        'edge': round(abs(float(pick['spread_diff'])), 1),
-                        'edge_class': pick.get('edge_class', ''),
-                        'neutral_site': pick.get('neutral_site', False)
-                    }
-        
+
+        #Basketball gets first refusal on the featured slot, at a higher bar than
+        #football: its lines move less, so a 3-point disagreement means less there.
+        featured_pick = (
+            featured_pick_from(basketball_preds, 'basketball', min_edge=5)
+            or featured_pick_from(football_preds, 'football', min_edge=3)
+        )
         if not featured_pick:
             print("No featured pick found (no games with sufficient edge)")
-        
-        # Get top 5 rankings for preview
-        football_top10 = football_predictor.FBS_rankings.head(10).to_dict('records')
-        basketball_top10 = basketball_predictor.D1_rankings.head(10).to_dict('records')
-
-        # Real track record for the homepage (falls back to empty record until picks are settled)
-        try:
-            overall_record = tracking.get_track_record(db)
-            football_record = tracking.get_track_record(db, sport="football")
-            basketball_record = tracking.get_track_record(db, sport="basketball")
-        except Exception as e:
-            print(f"Error loading track record: {e}")
-            overall_record = {"total_picks": 0, "straight_up_win_pct": None, "recommended_count": 0,
-                               "ats_win_pct": None, "profit_series": [], "total_profit": 0, "roi_pct": None}
-            football_record = dict(overall_record)
-            basketball_record = dict(overall_record)
 
         try:
             recent_results = tracking.get_recent_results(db, sport="football")
@@ -286,23 +289,15 @@ def index():
                              recent_results=recent_results,
                              team_logos=football_logos,
                              featured_pick=featured_pick,
-                             football_top10=football_top10,
-                             basketball_top10=basketball_top10,
+                             football_top10=football_predictor.FBS_rankings.head(10).to_dict('records'),
+                             basketball_top10=basketball_predictor.D1_rankings.head(10).to_dict('records'),
                              basketball_logos=basketball_logos,
-                             has_games=len(basketball_preds) > 0 or len(football_preds) > 0,
                              user_logged_in=user_logged_in,
-                             user_email=user_email,
-                             overall_record=overall_record,
-                             football_record=football_record,
-                             basketball_record=basketball_record,
                              highlights=MODEL_HIGHLIGHTS,
                              football_model_fully_trained=football_predictor.model_fully_trained)
     except Exception as e:
         print(f"Error loading index: {e}")
-        import traceback
         traceback.print_exc()
-        empty_record = {"total_picks": 0, "straight_up_win_pct": None, "recommended_count": 0,
-                         "ats_win_pct": None, "profit_series": [], "total_profit": 0, "roi_pct": None}
         return render_template('index.html',
                              recent_results=[],
                              team_logos={},
@@ -310,12 +305,7 @@ def index():
                              football_top10=[],
                              basketball_top10=[],
                              basketball_logos={},
-                             has_games=False,
                              user_logged_in=user_logged_in,
-                             user_email=user_email,
-                             overall_record=empty_record,
-                             football_record=dict(empty_record),
-                             basketball_record=dict(empty_record),
                              highlights=MODEL_HIGHLIGHTS,
                              football_model_fully_trained=getattr(football_predictor, 'model_fully_trained', True) if FOOTBALL_AVAILABLE else True)
 
@@ -328,56 +318,25 @@ def football():
 
         week = request.args.get("week", str(football_predictor.next_week))
         conference = request.args.get("conference", "All")
-        
-        # Convert week to int for predictor
+
         week_param = None
-        if week != "All" and week != "bowl":
+        if week == "bowl":
+            week_param = "bowl"
+        elif week != "All":
             try:
                 week_param = int(week)
-            except:
+            except ValueError:
                 week_param = football_predictor.next_week
-        elif week == "bowl":
-            week_param = "bowl"
-        
+
         predictions_df = football_predictor.get_upcoming_predictions(
             week=week_param,
             conference=conference if conference != "All" else None
         )
-        
-        # COMPLETE FIX: Clean up ALL NaN values
-        if len(predictions_df) > 0:
-            # Check first row to see if prob is decimal or percentage
-            sample_prob = predictions_df['prob'].iloc[0]
-            if sample_prob <= 1:
-                predictions_df['prob'] = predictions_df['prob'] * 100  # Convert to percentage
-            
-            predictions_df['margin'] = predictions_df['margin'].round(1)
-            
-            # Replace NaN betting_spread with None
-            predictions_df['betting_spread'] = predictions_df['betting_spread'].apply(
-                lambda x: None if pd.isna(x) else x
-            )
-            
-            # Replace NaN spread_diff (edge) with None
-            predictions_df['spread_diff'] = predictions_df['spread_diff'].apply(
-                lambda x: None if pd.isna(x) else x
-            )
-        
-        predictions = predictions_df.to_dict('records') if len(predictions_df) > 0 else []
-        
-        # Get list of conferences
-        try:
-            conferences = sorted(set(
-                list(football_predictor.completed['homeConference'].unique()) +
-                list(football_predictor.completed['awayConference'].unique())
-            ))
-        except:
-            conferences = football_conferences if football_conferences else []
-        
+
         return render_template('football.html',
-                             predictions=predictions,
+                             predictions=clean_predictions(predictions_df),
                              selected_week=week,
-                             conferences=conferences,
+                             conferences=conference_options(football_predictor, football_conferences),
                              selected_conference=conference,
                              team_logos=football_logos,
                              team_colors=football_colors,
@@ -385,7 +344,6 @@ def football():
                              weeks_completed=football_predictor.weeks_completed)
     except Exception as e:
         print(f"Error loading football: {e}")
-        import traceback
         traceback.print_exc()
         return render_template('football.html',
                              predictions=[],
@@ -405,51 +363,19 @@ def basketball():
         refresh_predictors()
 
         conference = request.args.get("conference", "All")
-
         predictions_df = basketball_predictor.get_upcoming_predictions(
             conference=conference if conference != "All" else None
         )
-        
-        #Clean up ALL NaN values
-        if len(predictions_df) > 0:
-            # Check first row to see if prob is decimal or percentage
-            sample_prob = predictions_df['prob'].iloc[0]
-            if sample_prob <= 1:
-                predictions_df['prob'] = predictions_df['prob'] * 100  # Convert to percentage
-            
-            predictions_df['margin'] = predictions_df['margin'].round(1)
-            
-            # Replace NaN betting_spread with None
-            predictions_df['betting_spread'] = predictions_df['betting_spread'].apply(
-                lambda x: None if pd.isna(x) else x
-            )
-            
-            # Replace NaN spread_diff (edge) with None
-            predictions_df['spread_diff'] = predictions_df['spread_diff'].apply(
-                lambda x: None if pd.isna(x) else x
-            )
-        
-        predictions = predictions_df.to_dict('records') if len(predictions_df) > 0 else []
-        
-        # Get list of conferences
-        try:
-            conferences = sorted(set(
-                list(basketball_predictor.completed['homeConference'].unique()) +
-                list(basketball_predictor.completed['awayConference'].unique())
-            ))
-        except:
-            conferences = basketball_conferences if basketball_conferences else []
-        
+
         return render_template('basketball.html',
-                             predictions=predictions,
-                             conferences=conferences,
+                             predictions=clean_predictions(predictions_df),
+                             conferences=conference_options(basketball_predictor, basketball_conferences),
                              selected_conference=conference)
     except Exception as e:
         print(f"Error loading basketball: {e}")
-        import traceback
         traceback.print_exc()
-        return render_template('basketball.html', 
-                             predictions=[], 
+        return render_template('basketball.html',
+                             predictions=[],
                              conferences=basketball_conferences,
                              selected_conference="All")
 
@@ -479,15 +405,7 @@ def example():
     Exists so visitors can see exactly what the real /football page looks like and
     how to read it, even in the off-season when there are no real games to show.
     """
-    user_logged_in = False
-    if 'user_id' in session:
-        try:
-            user_doc = db.collection("users").document(session["user_id"]).get()
-            if user_doc.exists:
-                user_logged_in = user_doc.to_dict().get("status") == "active"
-        except:
-            pass
-    user_email = session.get('email', None)
+    user_logged_in, user_email = current_user_state()
 
     sample_predictions = [
         {
@@ -514,7 +432,6 @@ def example():
 
     return render_template('example.html',
                          user_logged_in=user_logged_in,
-                         user_email=user_email,
                          predictions=sample_predictions)
 
 @app.route("/matchup")
@@ -619,15 +536,7 @@ def predict_matchup():
 
 @app.route("/terms")
 def terms():
-    user_logged_in = False
-    if 'user_id' in session:
-        try:
-            user_doc = db.collection("users").document(session["user_id"]).get()
-            if user_doc.exists:
-                user_logged_in = user_doc.to_dict().get("status") == "active"
-        except:
-            pass
-    user_email = session.get('email', None)
+    user_logged_in, user_email = current_user_state()
     return render_template("terms.html",
                            user_logged_in=user_logged_in,
                            user_email=user_email)
@@ -677,7 +586,6 @@ def run_daily_tracking_job():
         })
     except Exception as e:
         print(f"[tracking] Daily job failed: {e}")
-        import traceback
         traceback.print_exc()
 
 
@@ -762,8 +670,12 @@ def admin_settle_picks():
     return jsonify({"success": True, "snapshotted": snapshotted, "settled": settled}), 200
 
 
-@app.route("/payment-pending")
-def payment_pending():
+def _start_checkout(on_error):
+    """Open a Stripe Checkout session for the signed-in user.
+
+    Both checkout entry points build an identical session and differ only in where
+    they send someone when Stripe refuses.
+    """
     if 'user_id' not in session:
         return redirect('/login')
     try:
@@ -772,39 +684,25 @@ def payment_pending():
             mode="subscription",
             line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
             customer_email=session.get("email"),
-            client_reference_id=session.get("user_id"),
+            client_reference_id=session.get("user_id"),  # Firebase UID -- read by the webhook
             success_url=request.host_url + "stripe-success?session_id={CHECKOUT_SESSION_ID}",
             cancel_url=request.host_url + "logout",  # logs them out on cancel
         )
         return redirect(checkout_session.url, code=303)
     except Exception as e:
         print(f"Stripe error: {e}")
-        return redirect('/login')
+        return redirect(on_error)
+
+
+@app.route("/payment-pending")
+def payment_pending():
+    return _start_checkout(on_error='/login')
 
 
 @app.route("/create-checkout-session", methods=["POST"])
 def create_checkout_session():
-    """Create a Stripe Checkout session for $5/month subscription"""
-    if 'user_id' not in session:
-        return redirect('/login')
-
-    try:
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="subscription",
-            line_items=[{
-                "price": STRIPE_PRICE_ID,
-                "quantity": 1,
-            }],
-            customer_email=session.get("email"),
-            client_reference_id=session.get("user_id"),  # Firebase UID - used in webhook
-            success_url=request.host_url + "stripe-success?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=request.host_url + "logout",  # logs them out on cancel
-        )
-        return redirect(checkout_session.url, code=303)
-    except Exception as e:
-        print(f"Stripe error: {e}")
-        return redirect("/payment-pending")
+    """Start the $5/month subscription checkout."""
+    return _start_checkout(on_error='/payment-pending')
 
 
 @app.route("/stripe-success")
@@ -813,8 +711,6 @@ def stripe_success():
     
     if session_id and 'user_id' in session:
         try:
-            from datetime import timezone, timedelta
-            
             # Verify payment directly with Stripe — don't wait for webhook
             checkout_session = stripe.checkout.Session.retrieve(session_id)
             
@@ -843,8 +739,6 @@ def stripe_webhook():
     except (ValueError, stripe.error.SignatureVerificationError) as e:
         print(f"Webhook error: {e}")
         return jsonify({"error": "Invalid signature"}), 400
-
-    from datetime import timezone, timedelta
 
     if event["type"] == "checkout.session.completed":
         session_data = event["data"]["object"]
@@ -933,7 +827,6 @@ def admin_grant_access():
     if not users:
         return jsonify({"error": f"No user found with email {email}"}), 404
 
-    from datetime import timezone
     for user_doc in users:
         update_data = {
             "status": "active",
@@ -955,14 +848,8 @@ def server_error(e):
     return render_template("500.html"), 500
 
 if __name__ == "__main__":
-    print("=" * 80)
-    print("SPORTS ANALYTICS HUB - COMPLETELY FIXED VERSION")
-    print("=" * 80)
-    print(f"Football Predictor: {'✓ Available' if FOOTBALL_AVAILABLE else '✗ Not Available'}")
-    print(f"Basketball Predictor: {'✓ Available' if BASKETBALL_AVAILABLE else '✗ Not Available'}")
-    print("=" * 80)
-    print("Starting server")
-    print("=" * 80)
-    
+    print(f"Football predictor: {'available' if FOOTBALL_AVAILABLE else 'NOT available'}")
+    print(f"Basketball predictor: {'available' if BASKETBALL_AVAILABLE else 'NOT available'}")
+
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host="0.0.0.0", port=port)

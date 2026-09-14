@@ -6,7 +6,6 @@ import requests #For pulling data from CFBD
 import json #For handling json files
 import time
 from sklearn.linear_model import LinearRegression
-import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import os
 
