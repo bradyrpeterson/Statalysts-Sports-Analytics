@@ -99,6 +99,7 @@
                         <div class="result-head">
                             <span class="result-date">{{ r.date }}</span>
                             <span class="result-tier {{ r.tier }}">{{ r.edge|round(1) }} pt edge</span>
+                            {% if r.provisional %}<span class="result-tier provisional" title="Early-season pick: shown here, but held out of the track record until the model has four weeks of results">Provisional</span>{% endif %}
                         </div>
                         <div class="result-teams">
                             <div class="result-team {% if r.actual_winner == r.away %}won{% endif %}">

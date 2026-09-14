@@ -266,6 +266,9 @@ def load_data():
         "upcoming": upcoming,
         "next_week": next_week,
         "ratings": ratings,
+        #Exposed so a rating set can be refit as of an earlier point in the season
+        #(see ratings_as_of) -- the prior is the fixed half of that calculation.
+        "preseason_rating": preseason_rating,
         "home_field": home_field,
         "FBS_rankings": FBS_rankings,
         "weeks_completed": weeks_completed,
@@ -294,6 +297,26 @@ def refresh(force=False):
 # (e.g. a script importing this directly). app.py calls refresh() again at
 # the top of every request.
 refresh(force=True)
+
+
+def ratings_as_of(week):
+    """The rating set the model would have held going into `week`.
+
+    Fits the same ridge-to-prior on only the regular-season games completed before
+    that week, so a pick can be graded against the numbers that were actually live
+    when it was made rather than against a model that has since seen the result.
+    """
+    prior_games = completed[
+        (completed["seasonType"] == "regular") & (completed["week"].astype(float) < float(week))
+    ]
+    return _fit_ridge_to_prior(prior_games, preseason_rating)
+
+
+def predict_game_with(ratings_set, home, away, neutral_site=False):
+    """predict_game against a specific rating set (e.g. one from ratings_as_of)."""
+    margin = (ratings_set[home] - ratings_set[away]) + (0 if neutral_site else HOME_FIELD_ADVANTAGE)
+    prob = 1 / (1 + np.exp(-margin / 7))
+    return margin, prob
 
 
 #Prediciton function
@@ -433,14 +456,14 @@ def get_upcoming_predictions(week=None,conference=None):
                 betting_margin = -betting_spread
                 spread_diff = round(margin - betting_margin, 1)
 
-            # Before MODEL_FULLY_TRAINED_MIN_WEEKS, publish the prediction but
-            # not a betting edge: weeks 1-4 backtested at 47.4% against the
-            # spread versus 50.1% later, so early edges aren't worth acting on
-            # even though the winner picks are the most accurate of the season.
-            # tracking.py only counts a pick as "recommended" when edge_class is
-            # set, so clearing it here also keeps these out of the graded record.
-            if not model_fully_trained:
-                edge_class = None
+            # Before MODEL_FULLY_TRAINED_MIN_WEEKS the edge is published but flagged
+            # provisional: weeks 1-4 backtested at 47.4% against the spread versus
+            # 50.1% later, so these are worth showing but not worth putting in the
+            # headline record. tracking.py carries the flag through and leaves
+            # provisional picks out of the profit/ROI numbers while still displaying
+            # them. An earlier version cleared edge_class outright, which hid weeks
+            # 1-4 from the results panel entirely.
+            provisional = not model_fully_trained
 
             game_date = pd.to_datetime(game.get("startDate"), utc=True, errors="coerce")
             game_date_et = game_date.tz_convert("America/New_York") if pd.notna(game_date) else None
@@ -464,6 +487,14 @@ def get_upcoming_predictions(week=None,conference=None):
                 "betting_spread": betting_spread,
                 "edge_class": edge_class,
                 "spread_diff": spread_diff,
+                "provisional": provisional,
+                #Carried into tracked_picks so the results panel can show a whole
+                #week's slate rather than guessing at one from the dates.
+                "week": int(game["week"]) if pd.notna(game.get("week")) else None,
+                #CFBD hands back an aenum here. It subclasses str, so it compares and
+                #stores like one, but str() on it renders "SeasonType.REGULAR" -- take
+                #the plain value so what lands in Firestore is an ordinary string.
+                "season_type": getattr(game.get("seasonType"), "value", game.get("seasonType")),
                 "neutral_site": is_neutral,
                 "date": game_date.strftime("%Y-%m-%d") if pd.notna(game_date) else None,
                 "game_date_display": game_date_et.strftime("%a, %b %-d") if game_date_et is not None else None,

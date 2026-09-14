@@ -11,7 +11,9 @@ from functools import wraps
 import firebase_admin
 from firebase_admin import credentials, firestore, auth
 from google.cloud.firestore_v1.base_query import FieldFilter
-from datetime import datetime
+from datetime import datetime, timezone
+import threading
+import pytz
 
 # Add both sport folders to Python path
 sys.path.append('./football')
@@ -275,7 +277,7 @@ def index():
             basketball_record = dict(overall_record)
 
         try:
-            recent_results = tracking.get_recent_results(db, sport="football", limit=12)
+            recent_results = tracking.get_recent_results(db, sport="football")
         except Exception as e:
             print(f"Error loading recent results: {e}")
             recent_results = []
@@ -643,6 +645,16 @@ MODEL_HIGHLIGHTS = []
 # Track record: snapshot picks daily, settle them once games finish
 import tracking
 
+# The job settles the week's games; running it at 6am ET means Sunday's run lands after
+# even the latest Saturday night kickoff has gone final.
+TRACKING_JOB_HOUR = 6
+TRACKING_JOB_STATE_DOC = "job_state/daily_tracking"
+
+
+def _tracking_today():
+    return datetime.now(pytz.timezone("America/New_York"))
+
+
 def run_daily_tracking_job():
     try:
         snapshotted = tracking.snapshot_todays_picks(
@@ -656,10 +668,40 @@ def run_daily_tracking_job():
             basketball_predictor=basketball_predictor if BASKETBALL_AVAILABLE else None,
         )
         print(f"[tracking] Snapshotted {snapshotted} new picks, settled {settled} picks")
+        #Recorded so a worker that starts up after a missed run can tell and catch up.
+        db.document(TRACKING_JOB_STATE_DOC).set({
+            "last_run_date": _tracking_today().date().isoformat(),
+            "last_run_at": datetime.now(timezone.utc),
+            "snapshotted": snapshotted,
+            "settled": settled,
+        })
     except Exception as e:
         print(f"[tracking] Daily job failed: {e}")
         import traceback
         traceback.print_exc()
+
+
+def _run_tracking_job_if_missed():
+    """Run the job now if today's scheduled time has passed without it running.
+
+    The scheduler lives inside a gunicorn worker, and --max-requests recycles those
+    workers regularly. A worker replaced across the 6am mark takes the job's next run
+    to be tomorrow, so the day is skipped silently -- which on a Sunday means last
+    week's results sit unsettled until the following week. Checking the last recorded
+    run on startup closes that window.
+    """
+    try:
+        now = _tracking_today()
+        if now.hour < TRACKING_JOB_HOUR:
+            return  # today's run hasn't come due yet
+        today = now.date().isoformat()
+        state = db.document(TRACKING_JOB_STATE_DOC).get()
+        if state.exists and (state.to_dict() or {}).get("last_run_date") == today:
+            return
+        print(f"[tracking] No run recorded for {today} -- catching up now")
+        run_daily_tracking_job()
+    except Exception as e:
+        print(f"[tracking] Catch-up check failed: {e}")
 
 def _claim_scheduler_slot():
     """Return a held lock file if this process should own the scheduler, else None.
@@ -690,8 +732,15 @@ if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         from apscheduler.schedulers.background import BackgroundScheduler
 
         scheduler = BackgroundScheduler(timezone="America/New_York")
-        scheduler.add_job(run_daily_tracking_job, "cron", hour=6, minute=0)
+        #misfire_grace_time keeps a run that fires late (a busy worker, a slow CFBD
+        #call on the previous job) from being dropped outright.
+        scheduler.add_job(
+            run_daily_tracking_job, "cron",
+            hour=TRACKING_JOB_HOUR, minute=0, misfire_grace_time=3600,
+        )
         scheduler.start()
+        #Off the request path: a missed day is caught up without delaying startup.
+        threading.Thread(target=_run_tracking_job_if_missed, daemon=True).start()
 
 @app.route("/admin/settle-picks", methods=["POST"])
 def admin_settle_picks():

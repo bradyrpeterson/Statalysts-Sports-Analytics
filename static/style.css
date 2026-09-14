@@ -3304,6 +3304,11 @@ a {
 }
 .result-tier.high { background: rgba(81, 207, 102, 0.14); color: var(--accent-green); }
 .result-tier.medium { background: rgba(255, 212, 59, 0.13); color: var(--accent-yellow); }
+/* Weeks 1-4: displayed, but deliberately outside the profit/ROI record */
+.result-tier.provisional {
+    background: rgba(148, 163, 184, 0.16);
+    color: var(--text-muted, #94a3b8);
+}
 
 /* Moneyline / spread outcome chips */
 .result-outcomes {
