@@ -45,11 +45,12 @@ db = firestore.client()
 #it tries again after a failed pull (an API outage shouldn't leave stale data for an hour).
 DATA_REFRESH_SECONDS = 3600
 DATA_RETRY_SECONDS = 300
-#How long a page waits for the very first load after a deploy or restart before
-#rendering its empty fallback instead.
-DATA_WAIT_SECONDS = 60
-
 _predictors_loaded = threading.Event()
+
+
+class DataStillLoading(Exception):
+    """Raised by a page that needs the models before the first load has finished.
+    Each page's fallback branch catches it and renders the empty version."""
 
 
 def refresh_predictors():
@@ -62,18 +63,20 @@ def refresh_predictors():
     Render's small instances that ran past gunicorn's timeout and got the worker killed.
     """
     ok = True
-    if FOOTBALL_AVAILABLE:
+    for name, available, module in (
+        ("football", FOOTBALL_AVAILABLE, football_predictor if FOOTBALL_AVAILABLE else None),
+        ("basketball", BASKETBALL_AVAILABLE, basketball_predictor if BASKETBALL_AVAILABLE else None),
+    ):
+        if not available:
+            continue
+        started = time.monotonic()
         try:
-            football_predictor.refresh(force=True)
+            module.refresh(force=True)
+            print(f"[data] {name} loaded in {time.monotonic() - started:.1f}s")
         except Exception as e:
             ok = False
-            print(f"Error refreshing football predictor: {e}")
-    if BASKETBALL_AVAILABLE:
-        try:
-            basketball_predictor.refresh(force=True)
-        except Exception as e:
-            ok = False
-            print(f"Error refreshing basketball predictor: {e}")
+            print(f"[data] Error refreshing {name} predictor after {time.monotonic() - started:.1f}s: {e}")
+            traceback.print_exc()
     return ok
 
 
@@ -86,10 +89,32 @@ def _keep_predictors_fresh():
         time.sleep(DATA_REFRESH_SECONDS if ok else DATA_RETRY_SECONDS)
 
 
-def wait_for_predictors():
-    """Hold a request until the first data load has finished (only matters right
-    after a restart). Later refreshes swap data in without blocking anyone."""
-    return _predictors_loaded.wait(timeout=DATA_WAIT_SECONDS)
+def require_predictors():
+    """Refuse, immediately, to build a page from models that haven't loaded yet.
+
+    This deliberately doesn't wait. An earlier version held each request up to a
+    minute for the first load, and Render's health check hitting / every few seconds
+    filled every worker thread with waiting requests, so real visitors queued behind
+    them and the site just spun. Right after a restart pages render empty instead;
+    later refreshes swap data in without anyone noticing."""
+    if not _predictors_loaded.is_set():
+        raise DataStillLoading("predictor data is still loading")
+
+
+#The results panel reads every tracked pick from Firestore. Anything that loads the
+#homepage repeatedly (a health check, a crawler) would otherwise pay that read each
+#time, so the panel is rebuilt at most this often.
+RECENT_RESULTS_CACHE_SECONDS = 600
+_recent_results_cache = {"at": None, "results": []}
+
+
+def cached_recent_results():
+    now = time.monotonic()
+    cached_at = _recent_results_cache["at"]
+    if cached_at is None or now - cached_at > RECENT_RESULTS_CACHE_SECONDS:
+        _recent_results_cache["results"] = tracking.get_recent_results(db, sport="football")
+        _recent_results_cache["at"] = now
+    return _recent_results_cache["results"]
 
 def current_user_state():
     """(logged_in, email) for the public pages, which render a signed-in header but
@@ -197,6 +222,13 @@ def login_required(f):
             traceback.print_exc()
             return redirect(url_for('login'))
     return decorated_function
+
+
+@app.route("/healthz")
+def healthz():
+    """For Render's health check. Touches nothing -- no models, no API, no Firestore --
+    so it answers instantly even mid-load and costs nothing however often it's hit."""
+    return "ok", 200
 
 
 @app.route("/robots.txt")
@@ -308,8 +340,16 @@ def index():
     graded results (PUBLIC)."""
     user_logged_in, _ = current_user_state()
 
+    #Last week's results come from Firestore, not the models, so they show even
+    #while the models are still loading after a restart.
     try:
-        wait_for_predictors()
+        recent_results = cached_recent_results()
+    except Exception as e:
+        print(f"Error loading recent results: {e}")
+        recent_results = []
+
+    try:
+        require_predictors()
 
         basketball_preds = basketball_predictor.get_upcoming_predictions()
         #Current week only -- betting lines exist for nothing past it anyway.
@@ -324,12 +364,6 @@ def index():
         if not featured_pick:
             print("No featured pick found (no games with sufficient edge)")
 
-        try:
-            recent_results = tracking.get_recent_results(db, sport="football")
-        except Exception as e:
-            print(f"Error loading recent results: {e}")
-            recent_results = []
-
         return render_template('index.html',
                              recent_results=recent_results,
                              team_logos=football_logos,
@@ -341,10 +375,11 @@ def index():
                              highlights=MODEL_HIGHLIGHTS,
                              football_model_fully_trained=football_predictor.model_fully_trained)
     except Exception as e:
-        print(f"Error loading index: {e}")
-        traceback.print_exc()
+        if not isinstance(e, DataStillLoading):
+            print(f"Error loading index: {e}")
+            traceback.print_exc()
         return render_template('index.html',
-                             recent_results=[],
+                             recent_results=recent_results,
                              team_logos={},
                              featured_pick=None,
                              football_top10=[],
@@ -359,7 +394,7 @@ def index():
 def football():
     """Football predictions page (LOGIN REQUIRED)"""
     try:
-        wait_for_predictors()
+        require_predictors()
 
         week = request.args.get("week", str(football_predictor.next_week))
         conference = request.args.get("conference", "All")
@@ -388,8 +423,9 @@ def football():
                              model_fully_trained=football_predictor.model_fully_trained,
                              weeks_completed=football_predictor.weeks_completed)
     except Exception as e:
-        print(f"Error loading football: {e}")
-        traceback.print_exc()
+        if not isinstance(e, DataStillLoading):
+            print(f"Error loading football: {e}")
+            traceback.print_exc()
         return render_template('football.html',
                              predictions=[],
                              conferences=football_conferences,
@@ -405,7 +441,7 @@ def football():
 def basketball():
     """Basketball predictions page (LOGIN REQUIRED)"""
     try:
-        wait_for_predictors()
+        require_predictors()
 
         conference = request.args.get("conference", "All")
         predictions_df = basketball_predictor.get_upcoming_predictions(
@@ -417,8 +453,9 @@ def basketball():
                              conferences=conference_options(basketball_predictor, basketball_conferences),
                              selected_conference=conference)
     except Exception as e:
-        print(f"Error loading basketball: {e}")
-        traceback.print_exc()
+        if not isinstance(e, DataStillLoading):
+            print(f"Error loading basketball: {e}")
+            traceback.print_exc()
         return render_template('basketball.html',
                              predictions=[],
                              conferences=basketball_conferences,
@@ -429,7 +466,7 @@ def basketball():
 def rankings():
     """Rankings page (LOGIN REQUIRED)"""
     try:
-        wait_for_predictors()
+        require_predictors()
 
         football_rankings = football_predictor.FBS_rankings.head(25).to_dict('records')
         basketball_rankings = basketball_predictor.D1_rankings.head(25).to_dict('records')
@@ -438,7 +475,8 @@ def rankings():
                              football_rankings=football_rankings,
                              basketball_rankings=basketball_rankings)
     except Exception as e:
-        print(f"Error loading rankings: {e}")
+        if not isinstance(e, DataStillLoading):
+            print(f"Error loading rankings: {e}")
         return render_template('rankings.html', 
                              football_rankings=[], 
                              basketball_rankings=[])
@@ -485,10 +523,11 @@ def matchup():
     """Unified matchup predictor -- pick a sport, pick two teams, get a number.
     Replaces the old /football/custom and /basketball/custom pages, which now
     redirect here."""
-    wait_for_predictors()
-
     sports = {}
-    if FOOTBALL_AVAILABLE:
+    #Before the first load there are no ratings to list teams from; the page renders
+    #with no sports rather than waiting.
+    loaded = _predictors_loaded.is_set()
+    if FOOTBALL_AVAILABLE and loaded:
         try:
             fbs = set(football_predictor.fbs_teams)
             sports["football"] = [
@@ -499,7 +538,7 @@ def matchup():
             ]
         except Exception as e:
             print(f"Error building football matchup teams: {e}")
-    if BASKETBALL_AVAILABLE:
+    if BASKETBALL_AVAILABLE and loaded:
         try:
             d1 = set(basketball_predictor.d1_teams)
             sports["basketball"] = [
