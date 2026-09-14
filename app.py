@@ -68,13 +68,16 @@ def refresh_predictors():
         ("basketball", BASKETBALL_AVAILABLE, basketball_predictor if BASKETBALL_AVAILABLE else None),
     ):
         if not available:
+            _data_status[name] = "unavailable"
             continue
         started = time.monotonic()
         try:
             module.refresh(force=True)
+            _data_status[name] = "loaded"
             print(f"[data] {name} loaded in {time.monotonic() - started:.1f}s")
         except Exception as e:
             ok = False
+            _data_status[name] = f"failed:{type(e).__name__}"
             print(f"[data] Error refreshing {name} predictor after {time.monotonic() - started:.1f}s: {e}")
             traceback.print_exc()
     return ok
@@ -87,6 +90,35 @@ def _keep_predictors_fresh():
         #rather than waiting on data that isn't coming.
         _predictors_loaded.set()
         time.sleep(DATA_REFRESH_SECONDS if ok else DATA_RETRY_SECONDS)
+
+
+#What /healthz reports, so the load can be checked from outside without the logs.
+_data_status = {"football": "pending", "basketball": "pending"}
+_loader_lock = threading.Lock()
+_loader_pid = None
+_loader_started_at = None
+
+
+def ensure_loader_running():
+    """Start the loading thread in this process if it isn't already running here.
+
+    Threads don't survive fork(). If gunicorn imports the app before forking its
+    worker (--preload, or preload_app in a dashboard start command), a thread started
+    at import runs in the master, and the worker that serves pages never gets data --
+    every page renders its empty state forever. Checking the pid restarts the loader
+    in whichever process is actually handling requests."""
+    global _loader_pid, _loader_started_at
+    if _loader_pid == os.getpid():
+        return
+    with _loader_lock:
+        if _loader_pid == os.getpid():
+            return
+        _loader_pid = os.getpid()
+        _loader_started_at = time.monotonic()
+        #Whatever was copied from a parent process describes the parent's data, not ours.
+        _predictors_loaded.clear()
+        _data_status.update(football="pending", basketball="pending")
+        threading.Thread(target=_keep_predictors_fresh, daemon=True).start()
 
 
 def require_predictors():
@@ -227,8 +259,13 @@ def login_required(f):
 @app.route("/healthz")
 def healthz():
     """For Render's health check. Touches nothing -- no models, no API, no Firestore --
-    so it answers instantly even mid-load and costs nothing however often it's hit."""
-    return "ok", 200
+    so it answers instantly even mid-load and costs nothing however often it's hit.
+
+    The body also says whether this process has its data, and how long it has been
+    loading: an uptime that keeps resetting means the worker is being killed and restarted."""
+    uptime = time.monotonic() - _loader_started_at if _loader_started_at is not None else 0
+    status = " ".join(f"{name}={state}" for name, state in _data_status.items())
+    return f"ok pid={os.getpid()} up={uptime:.0f}s {status}", 200, {"Content-Type": "text/plain"}
 
 
 @app.route("/robots.txt")
@@ -331,8 +368,10 @@ except Exception as e:
 
 #Loading happens off the startup path: gunicorn kills a worker that takes longer than
 #its timeout to boot, and downloading plus fitting both models can take that long on
-#a small instance.
-threading.Thread(target=_keep_predictors_fresh, daemon=True).start()
+#a small instance. Started again from the first request in a forked worker (see
+#ensure_loader_running).
+ensure_loader_running()
+app.before_request(ensure_loader_running)
 
 @app.route("/")
 def index():
