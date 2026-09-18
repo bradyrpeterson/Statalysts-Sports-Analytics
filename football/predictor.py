@@ -22,7 +22,14 @@ with open("football/fbs_teams_2026.json", "r") as f:
     fbs_teams = json.load(f)
 
 need_cols = ["season","seasonType","week","startDate","startTimeTBD","venue","venueId",
-             "homeTeam","awayTeam","homePoints","awayPoints","homeConference","awayConference","neutralSite"]
+             "homeTeam","awayTeam","homePoints","awayPoints","homeConference","awayConference","neutralSite",
+             "homeClassification","awayClassification"]
+
+#The two divisions the model rates. Nearly half of the games in the first month
+#are FBS-vs-FCS, so FCS teams have to carry real ratings for FBS ratings to be
+#right -- but D-II and D-III opponents are too rare and too far off the scale to
+#be worth fitting.
+RATED_DIVISIONS = ("fbs", "fcs")
 
 #--- Preseason prior --------------------------------------------------------
 #A 50/50 blend of SP+ and our own rating regression on last season's results.
@@ -34,6 +41,17 @@ need_cols = ["season","seasonType","week","startDate","startTimeTBD","venue","ve
 #contributes here -- live, CFBD serves an actual preseason projection.
 SP_PLUS_WEIGHT = 0.5
 OWN_MODEL_WEIGHT = 0.5
+
+#FCS teams get the same treatment, with the FCS average standing in for SP+
+#(which only covers FBS): half their own rating from last season, half the FCS
+#average, on the same scale as the FBS ratings. An earlier version started every
+#FCS team with no history at 0 -- the same as an average FBS team -- and the rest
+#at about 18 points below it, when last season's results put the average FCS team
+#about 30 points below the average FBS team. That inflated any FBS team that had
+#beaten one. Measured over 2022-2025 (research/model_backtest/fcs_prior_backtest.py):
+#FBS-vs-FBS margin error fell 0.13 points/game from week 5 on, and FBS-vs-FCS
+#error fell from 18.1 to 13.2 points with 1 pick on the wrong side of a double-
+#digit favourite instead of 31.
 
 #--- How this season's results move a team off its prior --------------------
 #Ratings are a Massey point-margin regression fit with ridge shrinkage toward
@@ -159,14 +177,35 @@ def _fit_ridge_to_prior(games_df, prior, lam=RIDGE_TO_PRIOR_LAMBDA):
         hfa = 0.0 if row.get("neutralSite", False) else HOME_FIELD_ADVANTAGE
         y[i] = (row["homePoints"] - row["awayPoints"]) - hfa
 
-    #Non-FBS opponents appear on schedules but have no prior entry -- start them
-    #at 0 (an average team) and let their results move them from there.
+    #Every FBS/FCS team gets a prior entry in load_data(); this fill only covers a
+    #team that turns up mid-season with no history at all.
     p = prior.reindex(teams).fillna(0.0).values
     delta = np.linalg.solve(X.T @ X + lam * np.eye(len(teams)), X.T @ (y - X @ p))
 
     ratings = prior.reindex(prior.index.union(teams)).fillna(0.0)
     ratings.loc[teams] = p + delta
     return ratings
+
+
+def _division(value):
+    """CFBD returns classifications as an enum in some client versions and a plain
+    string in others; either way, the lowercase name ('fbs', 'fcs', 'ii', ...)."""
+    return (getattr(value, "value", value) or "").lower()
+
+
+def _rated_games(df):
+    """Games between two FBS/FCS teams -- everything the ratings are fit on."""
+    for col in ("homeClassification", "awayClassification"):
+        df[col] = df[col].map(_division)
+    return df[df["homeClassification"].isin(RATED_DIVISIONS) & df["awayClassification"].isin(RATED_DIVISIONS)]
+
+
+def _divisions(df):
+    """team -> 'fbs'/'fcs' as recorded on that season's games."""
+    out = {}
+    for side in ("home", "away"):
+        out.update(zip(df[f"{side}Team"], df[f"{side}Classification"]))
+    return out
 
 
 def load_data():
@@ -198,13 +237,9 @@ def load_data():
         #prior (see PRESEASON PRIOR at the top of this file).
         try:
             last_season_games = cfbd.GamesApi(api_client).get_games(year=2025, _request_timeout=HTTP_TIMEOUT_SECONDS)
-            last_season_fbs = [
-                t.school for t in
-                cfbd.TeamsApi(api_client).get_fbs_teams(year=2025, _request_timeout=HTTP_TIMEOUT_SECONDS)
-            ]
         except Exception as e:
             print(f"Error fetching last season's games: {e}")
-            last_season_games, last_season_fbs = [], []
+            last_season_games = []
 
     #Map venue id -> "City, State" so game locations can be shown alongside the venue name
     venue_location = {}
@@ -218,9 +253,8 @@ def load_data():
     df = pd.DataFrame([g.to_dict() for g in games])
     #Only keep the columns that matter
     df = df[need_cols].copy()
-    #Only keep games if it involved an FBS team
-    df = df[df["homeTeam"].isin(fbs_teams) | df["awayTeam"].isin(fbs_teams)]
-    df = df.reset_index(drop=True)
+    #Only keep games between FBS and FCS teams
+    df = _rated_games(df).reset_index(drop=True)
 
     #Need to make an upcoming data frame as well as a completed data frame
     completed = df.dropna(subset=["homePoints", "awayPoints"]).reset_index(drop=True)
@@ -241,14 +275,21 @@ def load_data():
     completed["margin"] = completed["homePoints"] - completed["awayPoints"]
 
     #Last season's own final ratings -- the other half of the preseason prior.
+    #Fit on every FBS and FCS game so both divisions land on one scale, then
+    #centred so the average FBS team is 0.
     last_season_df = pd.DataFrame([g.to_dict() for g in last_season_games])
+    last_division = {}
+    fcs_mean = 0.0
     if len(last_season_df) > 0:
-        last_season_df = last_season_df[
-            last_season_df["homeTeam"].isin(last_season_fbs) | last_season_df["awayTeam"].isin(last_season_fbs)
-        ]
+        last_season_df = _rated_games(last_season_df)
         last_season_df = last_season_df.dropna(subset=["homePoints", "awayPoints"]).reset_index(drop=True)
         last_season_df["margin"] = last_season_df["homePoints"] - last_season_df["awayPoints"]
+        last_division = _divisions(last_season_df)
     own_last_year_rating, _ = _fit_team_ratings(last_season_df)
+    if len(own_last_year_rating) > 0:
+        by_division = own_last_year_rating.groupby(own_last_year_rating.index.map(last_division)).mean()
+        fcs_mean = float(by_division.get("fcs", 0.0) - by_division.get("fbs", 0.0))
+        own_last_year_rating = own_last_year_rating - by_division.get("fbs", 0.0)
 
     preseason_rating_sp = pd.Series(
         {t.team: t.rating for t in sp_plus if t.team in fbs_teams}
@@ -256,10 +297,19 @@ def load_data():
     if len(preseason_rating_sp) > 0:
         preseason_rating_sp -= preseason_rating_sp.mean()
 
-    all_prior_teams = set(fbs_teams) | set(preseason_rating_sp.index) | set(own_last_year_rating.index)
-    sp_full = preseason_rating_sp.reindex(all_prior_teams).fillna(0.0)
-    own_full = own_last_year_rating.reindex(all_prior_teams).fillna(0.0)
-    preseason_rating = SP_PLUS_WEIGHT * sp_full + OWN_MODEL_WEIGHT * own_full
+    #Which division each team belongs to this season, falling back to last
+    #season's for anyone not on this year's schedule.
+    division = {**last_division, **_divisions(df)}
+    all_prior_teams = set(fbs_teams) | set(preseason_rating_sp.index) | set(own_last_year_rating.index) | set(division)
+    #An FBS team's "projection" is SP+; an FCS team's is the FCS average. A team
+    #without one (a new FCS program) starts at the FCS average outright.
+    projection = pd.Series(
+        {t: preseason_rating_sp.get(t, np.nan) if division.get(t, "fbs") == "fbs" else fcs_mean for t in all_prior_teams}
+    )
+    own_full = own_last_year_rating.reindex(all_prior_teams)
+    preseason_rating = (SP_PLUS_WEIGHT * projection + OWN_MODEL_WEIGHT * own_full).fillna(own_full).fillna(projection).fillna(0.0)
+    fbs_prior = preseason_rating[[t for t in preseason_rating.index if division.get(t, "fbs") == "fbs"]]
+    preseason_rating -= fbs_prior.mean()
 
     regular_completed_weeks = completed[completed["seasonType"] == "regular"]["week"].dropna()
     weeks_completed = int(regular_completed_weeks.max()) if len(regular_completed_weeks) > 0 else 0
@@ -460,15 +510,15 @@ def get_upcoming_predictions(week=None,conference=None):
 
         is_neutral = game.get("neutralSite",False)
 
-        #Skip games missing a team rating, and require both teams to be FBS: a
-        #non-FBS opponent (FCS "buy games" etc.) does get a rating out of the
-        #regression since it played an FBS team, but that number means nothing --
-        #it's fit on a handful of lopsided games and centred against FBS
-        #competition, not against its own level. That's what produced spreads
-        #20-35 points off Vegas for exactly these matchups.
+        #Skip games missing a team rating, and require an FBS team on at least
+        #one side. FCS-vs-FCS games are in the fit (they are what puts FCS teams
+        #on the right scale) but they are not something the site shows. FBS-vs-
+        #FCS games are shown: with FCS teams rated on their own results they
+        #measured 13.2 points of margin error over 2022-2025, close to the 12.5
+        #for FBS-vs-FBS (research/model_backtest/fcs_prior_backtest.py).
         if home not in ratings.index or away not in ratings.index:
             continue
-        if home not in fbs_teams or away not in fbs_teams:
+        if home not in fbs_teams and away not in fbs_teams:
             continue
 
         try:

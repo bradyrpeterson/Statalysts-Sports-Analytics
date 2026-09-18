@@ -185,12 +185,17 @@ def clean_predictions(predictions_df):
 
 def conference_options(predictor, fallback):
     """Conferences seen in this season's completed games, or the static list if the
-    predictor has not loaded any."""
+    predictor has not loaded any. Football's games include FCS-vs-FCS (they feed the
+    ratings), so there only conferences of FBS teams are offered."""
     try:
-        return sorted(set(
-            list(predictor.completed['homeConference'].unique()) +
-            list(predictor.completed['awayConference'].unique())
-        ))
+        games = predictor.completed
+        confs = set()
+        for side in ("home", "away"):
+            rows = games
+            if f"{side}Classification" in games.columns:
+                rows = games[games[f"{side}Classification"] == "fbs"]
+            confs.update(rows[f"{side}Conference"].dropna().unique())
+        return sorted(confs)
     except Exception:
         return fallback or []
 

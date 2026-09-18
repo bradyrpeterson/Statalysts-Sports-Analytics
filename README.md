@@ -32,7 +32,7 @@ ratings = argmin ‖y − Xb‖² + λ‖b − prior‖²
 
 - `X` — one row per completed game: `+1` for the home team, `−1` for the away team
 - `y` — the final margin, with home field already subtracted out
-- `prior` — a 50/50 blend of SP+'s preseason projection and a rating fit on last season's results
+- `prior` — a 50/50 blend of SP+'s preseason projection and a rating fit on last season's results. FCS teams get the same blend with the FCS average standing in for SP+, on the same scale — nearly half of September's games are FBS-vs-FCS, so an FCS team seeded like an average FBS side inflated every FBS team that beat one
 - `λ = 3` — how hard this season's results must argue to move a team off its prior
 
 A prediction is then just:
@@ -83,6 +83,7 @@ The harness also compares alternatives on identical data — Massey with capped 
     ├── backtest.py             # Massey / Colley / Elo / GBR / ensemble comparison
     ├── early_backtest.py       # Weeks 1–4, the regime the original backtest never covered
     ├── sweep_lambda.py         # Tunes the shrinkage parameter
+    ├── fcs_prior_backtest.py   # Where FCS teams should start (they were starting far too high)
     ├── residual_backtest.py    # Tests a bounded ML residual layer on top of the ratings
     └── results/                # Summary CSVs (per-game detail is gitignored)
 ```
