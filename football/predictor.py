@@ -477,8 +477,10 @@ def get_upcoming_predictions(week=None,conference=None):
     # Use the upcoming games dataset (no scores yet)
     games_to_predict = upcoming.copy()
 
+    #app.py passes "bowl" for the postseason view; anything past week 16 means the same.
+    postseason = week is not None and (str(week) == "bowl" or int(week) > 16)
     if week is not None:
-        if int(week)>16:
+        if postseason:
             games_to_predict = games_to_predict[games_to_predict["seasonType"]== "postseason"]
         else:
             games_to_predict = games_to_predict[(games_to_predict["week"].astype(int) == int(week))&(games_to_predict["seasonType"]=="regular")]
@@ -491,7 +493,7 @@ def get_upcoming_predictions(week=None,conference=None):
             (games_to_predict["awayConference"] == conference)
         ]
     # Fetch betting lines for this week
-    if week and int(week) > 16:
+    if postseason:
         betting_lines = get_betting_lines(week, season_type="postseason")
     else:
         betting_lines = get_betting_lines(week if week else next_week, season_type="regular")
