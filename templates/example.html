@@ -1,238 +1,88 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
-    <title>How to Read a Prediction | Statalysts</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-{% from "_icons.html" import icon_lock %}
-<body>
-    <div class="top-bar">
-        <div class="top-bar-content">
-            <div class="season-info">Sample data &mdash; not a real game</div>
-            <div class="top-nav-links"></div>
+{% extends "base.html" %}
+{% set active = 'example' %}
+{% from "_macros.html" import slate_board, board_script, edge_legend %}
+{% from "_icons.html" import icon_arrow %}
+
+{% block title %}How to Read a Prediction | Statalysts{% endblock %}
+{% block dateline %}Worked example &middot; the games below are invented, the layout is not{% endblock %}
+
+{% block content %}
+<section class="wrap phead">
+    <div class="phead-row">
+        <div>
+            <span class="eyebrow">Guide</span>
+            <h1>How to read<br>a prediction.</h1>
+            <p>This is the real predictions board with invented games in it, so you can see exactly what
+               the page looks like &mdash; including out of season, when there is nothing live to show.
+               Every number below is made up. Nothing on this page is a real projection.</p>
+        </div>
+    </div>
+</section>
+
+<section class="wrap" style="padding-top: var(--s6)">
+    <div class="steps">
+        <div class="step">
+            <div class="step-n">Column 1</div>
+            <h3>Matchup</h3>
+            <div><p>Away team on top, home team below, with each team's record this season. The side the
+                model favors is set in white; the other is dimmed. Kickoff and neutral-site status sit
+                underneath.</p></div>
+        </div>
+        <div class="step">
+            <div class="step-n">Column 2</div>
+            <h3>Model line</h3>
+            <div><p>The model's own projected margin. &ldquo;Ohio State &minus;9.5&rdquo; means it expects
+                Ohio State to win by nine and a half points. This comes from the difference between the two
+                power ratings, plus home advantage.</p></div>
+        </div>
+        <div class="step">
+            <div class="step-n">Column 3</div>
+            <h3>Market line</h3>
+            <div><p>The sportsbook spread for the same game, shown for comparison. A dash means no line has
+                been posted yet &mdash; which is common early in the week.</p></div>
+        </div>
+        <div class="step">
+            <div class="step-n">Column 4</div>
+            <h3>Edge</h3>
+            <div><p>The gap between those two numbers. A large edge means the model and the market disagree
+                sharply about the game. It is a measure of disagreement, not a measure of confidence, and
+                certainly not a guarantee &mdash; the market is right more often than not.</p></div>
+        </div>
+        <div class="step">
+            <div class="step-n">Column 5</div>
+            <h3>Win probability</h3>
+            <div><p>The model's estimated chance that its projected winner actually wins outright. Click
+                any row to open the full breakdown, including the split between the two teams and the
+                venue.</p></div>
+        </div>
+    </div>
+</section>
+
+<section class="wrap band">
+    <div class="shead">
+        <div class="shead-titles">
+            <span class="eyebrow">Sample board</span>
+            <h2>Four invented games</h2>
+            <p>Click a row to expand it, exactly as you would on the live board.</p>
         </div>
     </div>
 
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="logo">
-                <a href="/" class="brand-name">Statalysts</a>
-            </div>
-            <nav class="main-nav">
-                <a href="/">Home</a>
-                {% if user_logged_in %}
-                <a href="/football">Football</a>
-                <a href="/basketball">Basketball<span class="beta-tag">Beta</span></a>
-                <a href="/matchup">Matchup</a>
-                <a href="/rankings">Rankings</a>
-                {% else %}
-                <a href="/login" class="nav-locked">Predictions {{ icon_lock(14) }}</a>
-                <a href="/login" class="nav-locked">Rankings {{ icon_lock(14) }}</a>
-                {% endif %}
-                <a href="/example" class="active">Example</a>
-            </nav>
-            <div class="header-actions">
-                {% if user_logged_in %}
-                <a href="/manage-subscription" class="user-badge">Profile Information</a>
-                <a href="/logout" class="btn-logout">Log Out</a>
-                {% else %}
-                <a href="/login" class="btn-login">Log In</a>
-                <a href="/login?tab=signup" class="btn-subscribe">Sign Up Free</a>
-                {% endif %}
+    {{ slate_board(predictions, {}, 'example', high_edge=5, medium_edge=3) }}
+    {{ edge_legend(5, 3) }}
+
+    <div class="lockbar">
+        <div class="lockbar-text">
+            <div>
+                <h4>That is the whole page.</h4>
+                <p>The live board is identical, with real games and real numbers in it.</p>
             </div>
         </div>
-    </header>
-
-    <div class="page-header">
-        <div class="page-header-content">
-            <h1 class="page-title">How to Read a Prediction</h1>
-            <p class="page-subtitle">A breakdown of the key components of a prediction, and how to interpret them.</p>
+        <div class="lockbar-actions">
+            <a href="/football" class="btn btn-solid">Open the live board</a>
+            <a href="/#results" class="btn btn-line">See last week's results</a>
         </div>
     </div>
+</section>
+{% endblock %}
 
-    <div class="content">
-        <div class="model-steps compact">
-            <div class="feature-card">
-                <div class="feature-title">Matchup</div>
-                <div class="feature-description">Away team on top, home team on bottom. Whichever team the model favors to win is highlighted.</div>
-            </div>
-            <div class="feature-card">
-                <div class="feature-title">Model Spread</div>
-                <div class="feature-description">Our model's own predicted margin. "Ohio State -9.5" means the model expects Ohio State to win by 9.5 points.</div>
-            </div>
-            <div class="feature-card">
-                <div class="feature-title">Vegas Line</div>
-                <div class="feature-description">The actual sportsbook spread for the same game, for comparison. Shows N/A if a line isn't posted yet.</div>
-            </div>
-            <div class="feature-card">
-                <div class="feature-title">Edge</div>
-                <div class="feature-description">How far our model's line disagrees with Vegas. A bigger edge means a bigger gap between our number and the market's &mdash; and more potential value if the model is right.</div>
-            </div>
-            <div class="feature-card">
-                <div class="feature-title">Win %</div>
-                <div class="feature-description">The model's estimated probability that its predicted winner actually wins the game.</div>
-            </div>
-        </div>
-
-        <table class="predictions-table">
-            <thead>
-                <tr>
-                    <th>Matchup</th>
-                    <th>Model Spread</th>
-                    <th>Vegas Line</th>
-                    <th>Edge</th>
-                    <th>Win %</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for pred in predictions %}
-                <tr class="{% if pred.spread_diff and pred.spread_diff|abs >= 5 %}edge-high{% elif pred.spread_diff and pred.spread_diff|abs >= 3 %}edge-medium{% else %}edge-low{% endif %}">
-                    <td>
-                        <div class="matchup-cell">
-                            <div class="team-cell {% if pred.predicted_winner == pred.away %}team-predicted{% endif %}">
-                                {{ pred.away }}
-                            </div>
-                            <div class="vs-separator">@</div>
-                            <div class="team-cell {% if pred.predicted_winner == pred.home %}team-predicted{% endif %}">
-                                {{ pred.home }}
-                            </div>
-                            {% if pred.neutral_site %}
-                            <div class="neutral-indicator">(Neutral Site)</div>
-                            {% endif %}
-                        </div>
-                    </td>
-                    <td>
-                        <strong>{{ pred.predicted_winner }}</strong> -{{ pred.margin|round(1) }}
-                    </td>
-                    <td>
-                        {% if pred.betting_spread is not none %}
-                            {% if pred.betting_spread < 0 %}
-                            {{ pred.home }} {{ pred.betting_spread }}
-                            {% else %}
-                            {{ pred.away }} -{{ pred.betting_spread }}
-                            {% endif %}
-                        {% else %}
-                        <span class="no-data">N/A</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if pred.spread_diff is not none %}
-                        <span class="edge-value {% if pred.spread_diff|abs >= 5 %}high{% elif pred.spread_diff|abs >= 3 %}medium{% endif %}">
-                            +{{ pred.spread_diff|abs|round(1) }}
-                        </span>
-                        {% else %}
-                        <span class="no-data">N/A</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <div class="confidence-bar-cell">
-                            <div class="confidence-bar-small">
-                                <div class="confidence-fill-small" data-width="{{ pred.prob|round(1) }}"></div>
-                            </div>
-                            <span class="confidence-text-small">{{ pred.prob|round(1) }}%</span>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-
-        <div class="predictions-legend">
-            <h4>Edge Legend</h4>
-            <div class="legend-items">
-                <div class="legend-item">
-                    <div class="legend-color high"></div>
-                    <span class="legend-label"><strong>High Edge (5+ points)</strong> - Strong value opportunity</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color medium"></div>
-                    <span class="legend-label"><strong>Medium Edge (3-5 points)</strong> - Moderate value opportunity</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color low"></div>
-                    <span class="legend-label"><strong>Low Edge (&lt;3 points)</strong> - Minimal value</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="featured-cta">
-            <p>That's it &mdash; that's exactly what the real predictions page looks like, just with real games once the season is live.</p>
-            {% if user_logged_in %}
-            <a href="/football" class="btn btn-primary">View Real Predictions</a>
-            {% else %}
-            <a href="/login?tab=signup" class="btn btn-primary">Create Free Account</a>
-            {% endif %}
-        </div>
-    </div>
-
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-grid">
-                <div class="footer-brand">
-                    <div class="footer-logo-section">
-                        <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="footer-logo">
-                        <div class="footer-brand-name">Statalysts</div>
-                    </div>
-                    <p class="footer-description">
-                        Advanced AI-powered sports analytics and predictions for college football and basketball.
-                    </p>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Product</h4>
-                    <div class="footer-links">
-                        {% if user_logged_in %}
-                        <a href="/football">Football</a>
-                        <a href="/basketball">Basketball</a>
-                        <a href="/matchup">Matchup</a>
-                        <a href="/rankings">Rankings</a>
-                        {% endif %}
-                        <a href="/example">Example</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Company</h4>
-                    <div class="footer-links">
-                        <a href="/">Home</a>
-                        <a href="mailto:contact@statalysts.com">contact@statalysts.com</a>
-                        <a href="/terms">Terms & Conditions</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Account</h4>
-                    <div class="footer-links">
-                        {% if user_logged_in %}
-                        <a href="/logout">Log Out</a>
-                        {% else %}
-                        <a href="/login">Log In</a>
-                        <a href="/login">Sign Up</a>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <div>&copy; 2026 Statalysts. All rights reserved.</div>
-                <div class="footer-legal">
-                    <span>For entertainment purposes only. This is not advice and should just be used as a reference.</span>
-                </div>
-            </div>
-        </div>
-    </footer>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.confidence-fill-small').forEach(function(el) {
-                var width = el.getAttribute('data-width');
-                if (width) {
-                    el.style.width = width + '%';
-                }
-            });
-        });
-    </script>
-</body>
-</html>
+{% block scripts %}{{ board_script() }}{% endblock %}

@@ -1,148 +1,58 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
-    <title>Rankings | Statalysts</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <!-- Top Bar -->
-    <div class="top-bar">
-        <div class="top-bar-content">
-            <div class="season-info">Power Rankings Updated Daily</div>
-            <div class="top-nav-links">
-                <a href="/logout">Log Out</a>
-            </div>
+{% extends "base.html" %}
+{% set active = 'rankings' %}
+{% from "_macros.html" import rank_board %}
+{% from "_icons.html" import icon_empty %}
+
+{% block title %}Power Rankings | Statalysts{% endblock %}
+{% block dateline %}Power ratings refit as results come in{% endblock %}
+
+{% block content %}
+<section class="wrap phead">
+    <div class="phead-row">
+        <div>
+            <span class="eyebrow">Power ratings</span>
+            <h1>Every team,<br>on one scale.</h1>
+            <p>A rating is a team's strength expressed in points. Subtract one rating from another and you
+               have the model's projected margin for that game on a neutral floor &mdash; the same number
+               the predictions board is built from.</p>
+        </div>
+    </div>
+</section>
+
+<section class="wrap" style="padding-top: var(--s7)">
+    <div class="rank-cols">
+        <div class="rank-col">
+            <h2>College football <span class="meta">Top {{ football_rankings|length }}</span></h2>
+            {% if football_rankings %}
+                {{ rank_board(football_rankings, football_logos) }}
+            {% else %}
+                <div class="empty">{{ icon_empty() }}<h3>Ratings loading</h3><p>The football ratings are being refit and will appear shortly.</p></div>
+            {% endif %}
+        </div>
+
+        <div class="rank-col">
+            <h2>College basketball <span class="meta">Top {{ basketball_rankings|length }}</span></h2>
+            {% if basketball_rankings %}
+                {{ rank_board(basketball_rankings, basketball_logos) }}
+            {% else %}
+                <div class="empty">{{ icon_empty() }}<h3>Ratings loading</h3><p>The basketball ratings are being refit and will appear shortly.</p></div>
+            {% endif %}
         </div>
     </div>
 
-    <!-- Main Header -->
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="PetersonPredicts Logo" class="logo">
-                <a href="/" class="brand-name">Statalysts</a>
-            </div>
-            <nav class="main-nav">
-                <a href="/">Home</a>
-                <a href="/football">Football</a>
-                <a href="/basketball">Basketball<span class="beta-tag">Beta</span></a>
-                <a href="/matchup">Matchup</a>
-                <a href="/rankings" class="active">Rankings</a>
-                <a href="/example">Example</a>
-            </nav>
-            <div class="header-actions">
-                <a href="/manage-subscription" class="user-badge">Profile Information</a>
-            </div>
-        </div>
-    </header>
-
-    <!-- Page Header -->
-    <div class="page-header">
-        <div class="page-header-content">
-            <h1 class="page-title">Power Rankings</h1>
-            <p class="page-subtitle">Power rankings based on comprehensive performance metrics</p>
+    <div class="explain">
+        <h3>Reading a rating</h3>
+        <div>
+            <p>Ratings are fit by ridge regression on this season's scoring margins, so a team's number
+               accounts for the quality of its opponents rather than its record alone. Early in the season
+               the fit is pulled toward a preseason projection and released as real results accumulate.
+               Football rates FBS and FCS teams on a single scale, because FBS schedules include FCS
+               opponents and those games only carry information if both sides are rated.</p>
+            <p><strong>The scale is points.</strong> A team rated +51 is projected to beat a team rated +45
+               by six points on a neutral floor. Home advantage is added on top when a game is not played
+               at a neutral site.</p>
+            <p>Ratings are refit hourly as new results land, so a team's position can move mid-week.</p>
         </div>
     </div>
-
-    <!-- Content -->
-    <div class="content">
-        <div class="rankings-container">
-            <!-- Football Rankings -->
-            <div class="rankings-section">
-                <div class="rankings-header">
-                    <h2 class="rankings-title">College Football</h2>
-                </div>
-                <table class="rankings-table">
-                    {% for team in football_rankings %}
-                    <tr>
-                        <td class="rank-number">{{ loop.index }}</td>
-                        <td class="team-name-col">{{ team.team }}</td>
-                        <td class="rating-col">{{ team.rating|round(2) }}</td>
-                    </tr>
-                    {% endfor %}
-                </table>
-            </div>
-
-            <!-- Basketball Rankings -->
-            <div class="rankings-section">
-                <div class="rankings-header">
-                    <h2 class="rankings-title">College Basketball</h2>
-                </div>
-                <table class="rankings-table">
-                    {% for team in basketball_rankings %}
-                    <tr>
-                        <td class="rank-number">{{ loop.index }}</td>
-                        <td class="team-name-col">{{ team.team }}</td>
-                        <td class="rating-col">{{ team.rating|round(2) }}</td>
-                    </tr>
-                    {% endfor %}
-                </table>
-            </div>
-        </div>
-
-        <!-- Rankings Explanation -->
-        <div class="rankings-info">
-            <h3>How Rankings Work</h3>
-            <p>
-                The power rankings are generated using advanced machine learning models that analyze team performance across multiple metrics including offensive and defensive efficiency, strength of schedule, and recent form. Rankings update daily and serve as the foundation for our prediction models.
-            </p>
-            <p>
-                <strong>Rating Scale:</strong> The rating represents a team's rating where a higher number indicates a stronger team. A team with a rating of +51 would be projected to beat a team of +45 by 6 on a neutral field
-            </p>
-        </div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-grid">
-                <div class="footer-brand">
-                    <div class="footer-logo-section">
-                        <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="footer-logo">
-                        <div class="footer-brand-name">Statalysts</div>
-                    </div>
-                    <p class="footer-description">
-                        Advanced AI-powered sports analytics and predictions for college football and basketball.
-                    </p>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Product</h4>
-                    <div class="footer-links">
-                        <a href="/football">Football</a>
-                        <a href="/basketball">Basketball</a>
-                        <a href="/matchup">Matchup</a>
-                        <a href="/rankings">Rankings</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Company</h4>
-                    <div class="footer-links">
-                        <a href="/">Home</a>
-                        <a href="mailto:contact@statalysts.com">contact@statalysts.com</a>
-                        <a href="/terms">Terms & Conditions</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Account</h4>
-                    <div class="footer-links">
-                        <a href="/logout">Log Out</a>
-                    </div>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <div>&copy; 2026 Statalysts. All rights reserved.</div>
-                <div class="footer-legal">
-                    <span>For entertainment purposes only</span>
-                </div>
-            </div>
-        </div>
-    </footer>
-</body>
-</html>
+</section>
+{% endblock %}

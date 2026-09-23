@@ -1,39 +1,14 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
-    <title>Page Not Found | Statalysts</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="logo">
-                <a href="/" class="brand-name">Statalysts</a>
-            </div>
-        </div>
-    </header>
-
-    <div class="error-page">
-        <div class="error-page-content">
-            <div class="error-code">404</div>
-            <h1>This page didn't cover.</h1>
-            <p>The page you're looking for doesn't exist or may have moved. Let's get you back on track.</p>
-            <a href="/" class="btn btn-primary btn-large">Back to Home</a>
-        </div>
+{% extends "base.html" %}
+{% block title %}Page not found | Statalysts{% endblock %}
+{% block content %}
+<section class="wrap errpage">
+    <div class="errcode fig">404</div>
+    <h1>This one didn't cover.</h1>
+    <p>The page you asked for doesn't exist, or it moved. The board, the rankings and last week's
+       results are all still where you left them.</p>
+    <div class="hero-actions">
+        <a href="/" class="btn btn-solid btn-lg">Back to the front page</a>
+        <a href="/#results" class="btn btn-line btn-lg">Last week's results</a>
     </div>
-
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-bottom">
-                <div>&copy; 2026 Statalysts. All rights reserved.</div>
-            </div>
-        </div>
-    </footer>
-</body>
-</html>
+</section>
+{% endblock %}

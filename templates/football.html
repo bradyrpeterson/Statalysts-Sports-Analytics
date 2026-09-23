@@ -1,326 +1,166 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
-    <title>College Football Predictions | Statalysts</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-{% from "_icons.html" import icon_football %}
-<body>
-    <div class="top-bar">
-        <div class="top-bar-content">
-            <div class="season-info">2026 College Football Season</div>
-            <div class="top-nav-links">
-                <a href="/logout">Log Out</a>
-            </div>
+{% extends "base.html" %}
+{% set active = 'football' %}
+{% from "_macros.html" import slate_board, board_script, edge_legend %}
+{% from "_icons.html" import icon_warning, icon_empty %}
+
+{% block title %}College Football Predictions | Statalysts{% endblock %}
+{% block dateline %}2026 College Football season{% endblock %}
+
+{% block content %}
+<section class="wrap phead">
+    <div class="phead-row">
+        <div>
+            <span class="eyebrow">College football</span>
+            <h1>{% if selected_week == 'bowl' %}Bowl season{% elif selected_week and selected_week != 'All' %}Week {{ selected_week }}{% else %}The board{% endif %}</h1>
+            <p>Projected margin and win probability for every game on the slate, set against the posted
+               market line. Sort by edge to put the widest disagreements on top, or by kickoff to read
+               the week in order.</p>
         </div>
     </div>
+</section>
 
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="logo">
-                <a href="/" class="brand-name">Statalysts</a>
-            </div>
-            <nav class="main-nav">
-                <a href="/">Home</a>
-                <a href="/football" class="active">Football</a>
-                <a href="/basketball">Basketball<span class="beta-tag">Beta</span></a>
-                <a href="/matchup">Matchup</a>
-                <a href="/rankings">Rankings</a>
-                <a href="/example">Example</a>
-            </nav>
-            <div class="header-actions">
-                <a href="/manage-subscription" class="user-badge">Profile Information</a>
-            </div>
-        </div>
-    </header>
-
-    <div class="page-header">
-        <div class="page-header-content">
-            <h1 class="page-title">College Football Predictions</h1>
-            <p class="page-subtitle">Machine learning powered spread predictions with 61.2% ATS accuracy</p>
-        </div>
-    </div>
-
-    <div class="filters-section">
-        <div class="filters-content">
-            <div class="filter-group">
-                <span class="filter-label">Conference:</span>
-                <select class="filter-select" id="conf-select" onchange="updatePredictions()">
-                    <option value="All">All Conferences</option>
+<section class="wrap">
+    <div class="toolbar">
+        <div class="toolbar-group">
+            <label class="field">
+                <span class="field-label">Week</span>
+                <select class="select" id="week-select">
+                    {% for w in week_options %}
+                    <option value="{{ w }}" {% if selected_week|string == w|string %}selected{% endif %}>Week {{ w }}</option>
+                    {% endfor %}
+                    <option value="bowl" {% if selected_week == 'bowl' %}selected{% endif %}>Bowls</option>
+                </select>
+            </label>
+            <label class="field">
+                <span class="field-label">Conference</span>
+                <select class="select" id="conf-select">
+                    <option value="All">All conferences</option>
                     {% for conf in conferences %}
                     <option value="{{ conf }}" {% if conf == selected_conference %}selected{% endif %}>{{ conf }}</option>
                     {% endfor %}
                 </select>
-            </div>
-
-            <div class="sort-toggle" role="tablist" aria-label="Sort predictions">
-                <div class="sort-toggle-thumb" id="sort-toggle-thumb"></div>
-                <button type="button" class="sort-toggle-option active" data-mode="edge" onclick="setSortMode('edge')" role="tab" aria-selected="true">Sort by Edge</button>
-                <button type="button" class="sort-toggle-option" data-mode="time" onclick="setSortMode('time')" role="tab" aria-selected="false">Sort by Time</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="content">
-        {% if not model_fully_trained %}
-        <div class="model-training-notice">
-            <span class="model-training-notice-icon">⚠️</span>
-            <div class="model-training-notice-text">
-                <strong>Model still warming up.</strong> Only {{ weeks_completed }} week{{ 's' if weeks_completed != 1 else '' }} of this season's games {{ 'has' if weeks_completed == 1 else 'have' }} been played so far, so ratings are still leaning heavily on preseason projections and last season's results rather than this year's actual results.
-            </div>
-        </div>
-        {% endif %}
-        {% if predictions|length == 0 %}
-        <div class="empty-state">
-            <div class="empty-icon">{{ icon_football() }}</div>
-            <h2 class="empty-title">No Games Scheduled</h2>
-            <p class="empty-text">Check back later for upcoming predictions</p>
-        </div>
-        {% else %}
-        <div class="pred-list" id="pred-list">
-            {% for pred in predictions %}
-            <details class="pred-card {% if pred.spread_diff and pred.spread_diff|abs >= 5 %}edge-high{% elif pred.spread_diff and pred.spread_diff|abs >= 3 %}edge-medium{% else %}edge-low{% endif %}"
-                data-edge="{{ pred.spread_diff|abs if pred.spread_diff is not none else -1 }}"
-                data-kickoff="{{ pred.kickoff_iso or '' }}"
-                data-day="{{ pred.game_date_display or 'Date TBD' }}">
-                <summary class="pred-summary">
-                    <div class="pred-teams">
-                        <div class="pred-team {% if pred.predicted_winner == pred.away %}team-predicted{% endif %}">
-                            {% if team_logos.get(pred.away) %}<img src="{{ team_logos[pred.away] }}" class="team-logo" alt="">{% endif %}
-                            <span class="pred-team-name">{{ pred.away }}</span>
-                            <span class="pred-team-record">{{ pred.away_record }}</span>
-                        </div>
-                        <div class="pred-team {% if pred.predicted_winner == pred.home %}team-predicted{% endif %}">
-                            {% if team_logos.get(pred.home) %}<img src="{{ team_logos[pred.home] }}" class="team-logo" alt="">{% endif %}
-                            <span class="pred-team-name">{{ pred.home }}</span>
-                            <span class="pred-team-record">{{ pred.home_record }}</span>
-                        </div>
-                    </div>
-                    <div class="pred-meta">
-                        <div class="pred-kickoff">
-                            <span class="pred-kickoff-date">{{ pred.game_date_display or "TBD" }}</span>
-                            {% if pred.game_time_display %}<span class="pred-kickoff-time">{{ pred.game_time_display }}</span>{% endif %}
-                        </div>
-                        {% if pred.spread_diff and pred.spread_diff|string != 'nan' and pred.spread_diff|abs >= 3 %}
-                        <span class="pred-badge {% if pred.spread_diff|abs >= 5 %}high{% else %}medium{% endif %}">
-                            {% if pred.spread_diff|abs >= 5 %}Strong{% else %}Edge{% endif %} {{ pred.spread_diff|abs|round(1) }}
-                        </span>
-                        {% endif %}
-                    </div>
-                    <span class="pred-chevron" aria-hidden="true"></span>
-                </summary>
-
-                <div class="pred-detail">
-                    <div class="pred-detail-grid">
-                        <div class="pred-stat">
-                            <div class="pred-stat-label">Our Line</div>
-                            <div class="pred-stat-value">{{ pred.predicted_winner }} -{{ pred.margin|round(1) }}</div>
-                        </div>
-                        <div class="pred-stat">
-                            <div class="pred-stat-label">Vegas Line</div>
-                            <div class="pred-stat-value">
-                                {% if pred.betting_spread and pred.betting_spread|string != 'nan' %}
-                                    {% if pred.betting_spread < 0 %}{{ pred.home }} {{ pred.betting_spread }}{% else %}{{ pred.away }} -{{ pred.betting_spread }}{% endif %}
-                                {% else %}
-                                <span class="no-data">Not posted</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div class="pred-stat">
-                            <div class="pred-stat-label">Edge</div>
-                            <div class="pred-stat-value">
-                                {% if pred.spread_diff and pred.spread_diff|string != 'nan' %}
-                                <span class="edge-value {% if pred.spread_diff|abs >= 5 %}high{% elif pred.spread_diff|abs >= 3 %}medium{% endif %}">{{ pred.spread_diff|abs|round(1) }} pts</span>
-                                {% else %}
-                                <span class="no-data">N/A</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div class="pred-stat">
-                            <div class="pred-stat-label">Confidence</div>
-                            <div class="pred-stat-value">{{ pred.prob|round(1) }}% {{ pred.predicted_winner }}</div>
-                        </div>
-                    </div>
-
-                    {% set home_pct = pred.prob if pred.predicted_winner == pred.home else 100 - pred.prob %}
-                    {% set away_pct = 100 - home_pct %}
-                    {% set circ = 282.743 %}
-                    {% set away_len = circ * away_pct / 100 %}
-                    <div class="pred-confidence">
-                        <div class="pred-conf-team">
-                            {% if team_logos.get(pred.away) %}<img src="{{ team_logos[pred.away] }}" class="pred-conf-logo" alt="">{% endif %}
-                            <span class="pred-conf-pct">{{ away_pct|round(1) }}%</span>
-                            <span class="pred-conf-name">{{ pred.away }}</span>
-                        </div>
-
-                        <svg class="pred-donut" viewBox="0 0 120 120" role="img"
-                             aria-label="{{ pred.away }} {{ away_pct|round(1) }} percent, {{ pred.home }} {{ home_pct|round(1) }} percent">
-                            <circle cx="60" cy="60" r="45" fill="none" stroke="var(--bg-tertiary)" stroke-width="20"></circle>
-                            <circle cx="60" cy="60" r="45" fill="none" stroke-width="20"
-                                    stroke="{{ team_colors.get(pred.away, '#5a6270') }}"
-                                    stroke-dasharray="{{ away_len|round(2) }} {{ (circ - away_len)|round(2) }}"
-                                    transform="rotate(-90 60 60)"></circle>
-                            <circle cx="60" cy="60" r="45" fill="none" stroke-width="20"
-                                    stroke="{{ team_colors.get(pred.home, '#a8b2c8') }}"
-                                    stroke-dasharray="{{ (circ - away_len)|round(2) }} {{ away_len|round(2) }}"
-                                    stroke-dashoffset="{{ (-away_len)|round(2) }}"
-                                    transform="rotate(-90 60 60)"></circle>
-                            <text x="60" y="54" class="pred-donut-cap">WIN</text>
-                            <text x="60" y="70" class="pred-donut-cap">PROB</text>
-                        </svg>
-
-                        <div class="pred-conf-team">
-                            {% if team_logos.get(pred.home) %}<img src="{{ team_logos[pred.home] }}" class="pred-conf-logo" alt="">{% endif %}
-                            <span class="pred-conf-pct">{{ home_pct|round(1) }}%</span>
-                            <span class="pred-conf-name">{{ pred.home }}</span>
-                        </div>
-                    </div>
-
-                    {% if pred.location %}
-                    <p class="pred-venue">{{ pred.location }}{% if pred.neutral_site %} &middot; Neutral Site{% endif %}</p>
-                    {% elif pred.neutral_site %}
-                    <p class="pred-venue">Neutral Site</p>
-                    {% endif %}
-                </div>
-            </details>
-            {% endfor %}
+            </label>
         </div>
 
-        <div class="predictions-legend">
-            <h4>Edge Legend</h4>
-            <div class="legend-items">
-                <div class="legend-item">
-                    <div class="legend-color high"></div>
-                    <span class="legend-label"><strong>High Edge (5+ points)</strong> - Strong value opportunity</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color medium"></div>
-                    <span class="legend-label"><strong>Medium Edge (3-5 points)</strong> - Moderate value opportunity</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color low"></div>
-                    <span class="legend-label"><strong>Low Edge (&lt;3 points)</strong> - Minimal value</span>
-                </div>
-            </div>
+        {% if predictions %}
+        <div class="seg" id="sort-seg" role="tablist" aria-label="Sort the board">
+            <span class="seg-thumb" id="sort-thumb"></span>
+            <button type="button" class="on" data-mode="edge" role="tab" aria-selected="true">By edge</button>
+            <button type="button" data-mode="time" role="tab" aria-selected="false">By kickoff</button>
         </div>
         {% endif %}
     </div>
+</section>
 
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-grid">
-                <div class="footer-brand">
-                    <div class="footer-logo-section">
-                        <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="footer-logo">
-                        <div class="footer-brand-name">Statalysts</div>
-                    </div>
-                    <p class="footer-description">
-                        Advanced AI-powered sports analytics and predictions for college football and basketball.
-                    </p>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Product</h4>
-                    <div class="footer-links">
-                        <a href="/football">Football</a>
-                        <a href="/basketball">Basketball</a>
-                        <a href="/matchup">Matchup</a>
-                        <a href="/rankings">Rankings</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Company</h4>
-                    <div class="footer-links">
-                        <a href="/">Home</a>
-                        <a href="mailto:contact@statalysts.com">contact@statalysts.com</a>
-                        <a href="/terms">Terms & Conditions</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Account</h4>
-                    <div class="footer-links">
-                        <a href="/logout">Log Out</a>
-                    </div>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <div>&copy; 2026 Statalysts. All rights reserved.</div>
-                <div class="footer-legal">
-                    <span>For entertainment purposes only</span>
-                </div>
-            </div>
-        </div>
-    </footer>
+<section class="wrap" style="padding-top: var(--s6)">
+    {% if not model_fully_trained %}
+    <div class="notice" style="margin-bottom: var(--s6)">
+        {{ icon_warning(17) }}
+        <div><strong>The model is still warming up.</strong> {{ weeks_completed }} week{{ 's' if weeks_completed != 1 else '' }}
+        of this season {{ 'has' if weeks_completed == 1 else 'have' }} been played, so the ratings still lean
+        heavily on preseason projections and last season's results rather than this year's games.</div>
+    </div>
+    {% endif %}
 
-    <script>
-        function updatePredictions() {
-            const conf = document.getElementById('conf-select').value;
-            window.location.href = '/football?conference=' + conf;
-        }
+    {% if not predictions %}
+    <div class="empty">
+        {{ icon_empty() }}
+        <h3>Nothing scheduled</h3>
+        <p>No games match this week and conference. Try another week, or check back closer to kickoff.</p>
+    </div>
+    {% else %}
+    {{ slate_board(predictions, team_logos, 'board', team_colors=team_colors, high_edge=5, medium_edge=3) }}
+    {{ edge_legend(5, 3) }}
+    {% endif %}
+</section>
+{% endblock %}
 
-        function sortPredictions(mode) {
-            const list = document.getElementById('pred-list');
-            if (!list) return;
-            const cards = Array.from(list.querySelectorAll('.pred-card'));
 
-            cards.sort(function(a, b) {
-                if (mode === 'time') {
-                    const ta = a.dataset.kickoff ? new Date(a.dataset.kickoff).getTime() : Infinity;
-                    const tb = b.dataset.kickoff ? new Date(b.dataset.kickoff).getTime() : Infinity;
-                    return ta - tb;
-                }
-                // Edge: highest absolute edge first, games with no line last
-                const ea = parseFloat(a.dataset.edge);
-                const eb = parseFloat(b.dataset.edge);
-                return eb - ea;
-            });
+{% block scripts %}
+{{ board_script() }}
+<script>
+(function () {
+    var week = document.getElementById('week-select');
+    var conf = document.getElementById('conf-select');
 
-            // Day separators only make sense in chronological order
-            list.querySelectorAll('.pred-day-header').forEach(function(h) { h.remove(); });
+    function go() {
+        var params = new URLSearchParams();
+        if (week) params.set('week', week.value);
+        if (conf) params.set('conference', conf.value);
+        window.location.href = '/football?' + params.toString();
+    }
+    if (week) week.addEventListener('change', go);
+    if (conf) conf.addEventListener('change', go);
 
-            let lastDay = null;
-            cards.forEach(function(card) {
-                if (mode === 'time') {
-                    const day = card.dataset.day;
-                    if (day && day !== lastDay) {
-                        const header = document.createElement('div');
-                        header.className = 'pred-day-header';
-                        header.textContent = day;
-                        list.appendChild(header);
-                        lastDay = day;
-                    }
-                }
-                list.appendChild(card);
-            });
-        }
+    /* ---- Sorting. Rows and their detail rows move together. ---- */
+    var table = document.getElementById('board');
+    var seg = document.getElementById('sort-seg');
+    if (!table || !seg) return;
+    var thumb = document.getElementById('sort-thumb');
+    var buttons = Array.prototype.slice.call(seg.querySelectorAll('button'));
 
-        function setSortMode(mode) {
-            document.querySelectorAll('.sort-toggle-option').forEach(function(btn) {
-                const active = btn.dataset.mode === mode;
-                btn.classList.toggle('active', active);
-                btn.setAttribute('aria-selected', active ? 'true' : 'false');
-            });
-            const thumb = document.getElementById('sort-toggle-thumb');
-            if (thumb) thumb.classList.toggle('is-time', mode === 'time');
-            sortPredictions(mode);
-        }
+    function sortBoard(mode) {
+        var tbody = table.querySelector('tbody');
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr.row'));
 
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.confidence-fill-small').forEach(function(el) {
-                var width = el.getAttribute('data-width');
-                if (width) {
-                    el.style.width = width + '%';
-                }
-            });
-
-            // Default view: sorted by edge so the strongest value opportunities are on top
-            sortPredictions('edge');
+        rows.sort(function (a, b) {
+            if (mode === 'time') {
+                var ta = a.dataset.kickoff ? new Date(a.dataset.kickoff).getTime() : Infinity;
+                var tb = b.dataset.kickoff ? new Date(b.dataset.kickoff).getTime() : Infinity;
+                return ta - tb;
+            }
+            return parseFloat(b.dataset.edge) - parseFloat(a.dataset.edge);
         });
-    </script>
-</body>
-</html>
+
+        /* Day headings only make sense in kickoff order. */
+        tbody.querySelectorAll('tr.dayrow').forEach(function (r) { r.remove(); });
+
+        var lastDay = null;
+        rows.forEach(function (row) {
+            if (mode === 'time') {
+                var day = row.dataset.day;
+                if (day && day !== lastDay) {
+                    var headRow = document.createElement('tr');
+                    headRow.className = 'dayrow';
+                    var cell = document.createElement('td');
+                    cell.colSpan = 6;
+                    cell.textContent = day;
+                    headRow.appendChild(cell);
+                    tbody.appendChild(headRow);
+                    lastDay = day;
+                }
+            }
+            tbody.appendChild(row);
+            var detail = document.getElementById(row.dataset.detail);
+            if (detail) tbody.appendChild(detail);
+        });
+    }
+
+    function place(btn) {
+        if (!thumb) return;
+        thumb.style.width = btn.offsetWidth + 'px';
+        thumb.style.transform = 'translateX(' + (btn.offsetLeft - 3) + 'px)';
+    }
+
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            buttons.forEach(function (b) {
+                var on = b === btn;
+                b.classList.toggle('on', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            place(btn);
+            sortBoard(btn.dataset.mode);
+        });
+    });
+
+    /* Default view puts the widest disagreements on top. */
+    sortBoard('edge');
+    requestAnimationFrame(function () { place(buttons[0]); });
+    window.addEventListener('resize', function () {
+        var on = seg.querySelector('button.on');
+        if (on) place(on);
+    });
+})();
+</script>
+{% endblock %}

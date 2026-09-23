@@ -1,0 +1,149 @@
+{# ---------------------------------------------------------------------------
+   The shell every page sits in: head, dateline, masthead, footer.
+   Before this existed each template carried its own copy of all four, which is
+   why the nav drifted out of sync between pages.
+
+   A child sets `active` at its top level to light the right nav item:
+       {% extends "base.html" %}{% set active = 'football' %}
+   --------------------------------------------------------------------------- #}
+{% from "_icons.html" import icon_menu %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#07080a">
+    <title>{% block title %}Statalysts{% endblock %}</title>
+    <meta name="description" content="{% block description %}Statalysts rates every college football and basketball team on a single scale and turns those ratings into game-by-game projections.{% endblock %}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300;1,6..72,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+{% block chrome %}
+    <div class="dateline">
+        <div class="wrap dateline-in">
+            <div class="dateline-left">{% block dateline %}2026 College Football &middot; 2025-26 College Basketball{% endblock %}</div>
+            <div class="dateline-right">
+                {% block dateline_right %}
+                <span class="live">Ratings refresh hourly</span>
+                {% endblock %}
+            </div>
+        </div>
+    </div>
+
+    <header class="masthead">
+        <div class="wrap masthead-in">
+            <a href="/" class="wordmark" aria-label="Statalysts home">
+                <img src="{{ url_for('static', filename='favicon.png') }}" alt="">
+                <span class="wordmark-text">Statalysts<span class="dot">.</span></span>
+            </a>
+
+            <nav class="nav" id="nav" aria-label="Primary">
+                <a href="/football" class="{{ 'on' if active == 'football' }}">Football</a>
+                <a href="/basketball" class="{{ 'on' if active == 'basketball' }}">Basketball <span class="tag-beta">Beta</span></a>
+                <a href="/matchup" class="{{ 'on' if active == 'matchup' }}">Predictor</a>
+                <a href="/rankings" class="{{ 'on' if active == 'rankings' }}">Rankings</a>
+                <a href="/#results">Results</a>
+                <a href="/example" class="{{ 'on' if active == 'example' }}">Guide</a>
+            </nav>
+
+            <div class="masthead-actions">
+                <button type="button" class="nav-toggle" id="nav-toggle"
+                        aria-label="Menu" aria-expanded="false" aria-controls="nav">{{ icon_menu() }}</button>
+            </div>
+        </div>
+    </header>
+{% endblock %}
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+{% block footer %}
+    <footer class="foot">
+        <div class="wrap">
+            <div class="foot-grid">
+                <div class="foot-brand">
+                    <div class="wordmark">
+                        <img src="{{ url_for('static', filename='favicon.png') }}" alt="">
+                        <span class="wordmark-text">Statalysts<span class="dot">.</span></span>
+                    </div>
+                    <p>Power ratings and game projections for college football and college basketball, refit as results come in.</p>
+                </div>
+                <div>
+                    <h4>Predictions</h4>
+                    <div class="foot-links">
+                        <a href="/football">Football</a>
+                        <a href="/basketball">Basketball</a>
+                        <a href="/matchup">Matchup predictor</a>
+                    </div>
+                </div>
+                <div>
+                    <h4>Model</h4>
+                    <div class="foot-links">
+                        <a href="/rankings">Power rankings</a>
+                        <a href="/#results">Last week's results</a>
+                        <a href="/#how">How it works</a>
+                    </div>
+                </div>
+                <div>
+                    <h4>About</h4>
+                    <div class="foot-links">
+                        <a href="/example">Reading a prediction</a>
+                        <a href="mailto:contact@statalysts.com">contact@statalysts.com</a>
+                        <a href="/terms">Terms &amp; conditions</a>
+                    </div>
+                </div>
+            </div>
+            <div class="foot-bottom">
+                <div>&copy; 2026 Statalysts</div>
+                <p>Model output published for reference and entertainment. Not advice, and no outcome is guaranteed.</p>
+            </div>
+        </div>
+    </footer>
+{% endblock %}
+
+    <script>
+    (function () {
+        /* Mobile nav */
+        var toggle = document.getElementById('nav-toggle');
+        var nav = document.getElementById('nav');
+        if (toggle && nav) {
+            toggle.addEventListener('click', function () {
+                var open = nav.classList.toggle('open');
+                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
+
+        /* Section reveals. Skipped wholesale when the OS asks for less motion. */
+        var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var targets = document.querySelectorAll('.reveal');
+        if (still || !('IntersectionObserver' in window)) {
+            targets.forEach(function (el) { el.classList.add('shown'); });
+        } else {
+            var io = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (!entry.isIntersecting) return;
+                    entry.target.classList.add('shown');
+                    io.unobserve(entry.target);
+                });
+            }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+            targets.forEach(function (el) { io.observe(el); });
+        }
+
+        /* Bars and rules declare their width in markup so the CSS transition
+           has something to animate from. */
+        requestAnimationFrame(function () {
+            document.querySelectorAll('[data-w]').forEach(function (el) {
+                el.style.width = el.getAttribute('data-w') + '%';
+            });
+        });
+    })();
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

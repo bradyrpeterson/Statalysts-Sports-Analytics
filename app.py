@@ -139,6 +139,10 @@ def require_predictors():
 RECENT_RESULTS_CACHE_SECONDS = 600
 _recent_results_cache = {"at": None, "results": []}
 
+#Weeks the /football filter offers. get_upcoming_predictions treats anything past 16
+#as the postseason, which the selector exposes as "Bowls".
+REGULAR_SEASON_WEEKS = list(range(1, 17))
+
 
 def cached_recent_results():
     now = time.monotonic()
@@ -147,20 +151,6 @@ def cached_recent_results():
         _recent_results_cache["results"] = tracking.get_recent_results(db, sport="football")
         _recent_results_cache["at"] = now
     return _recent_results_cache["results"]
-
-def current_user_state():
-    """(logged_in, email) for the public pages, which render a signed-in header but
-    do not require an account. Every public route needs the same two values."""
-    user_logged_in = False
-    if 'user_id' in session:
-        try:
-            user_doc = db.collection("users").document(session["user_id"]).get()
-            if user_doc.exists:
-                user_logged_in = user_doc.to_dict().get("status") == "active"
-        except Exception as e:
-            print(f"Error reading user state: {e}")
-    return user_logged_in, session.get('email')
-
 
 def clean_predictions(predictions_df):
     """Turn a predictions frame into template-ready rows.
@@ -198,6 +188,63 @@ def conference_options(predictor, fallback):
         return sorted(confs)
     except Exception:
         return fallback or []
+
+
+def results_summary(results):
+    """Last week's record over exactly the games in the results panel.
+
+    Counts what is shown and nothing else -- this is one slate, not a season
+    number, and it deliberately does not reach into the wider track record.
+    Games with no posted line have no spread result, so they count toward the
+    outright record and are left out of the against-the-spread one.
+    """
+    if not results:
+        return None
+
+    games = len(results)
+    su_wins = sum(1 for r in results if r.get("ml_correct"))
+    ats_wins = sum(1 for r in results if r.get("ats_result") == "win")
+    ats_losses = sum(1 for r in results if r.get("ats_result") == "loss")
+    ats_pushes = sum(1 for r in results if r.get("ats_result") == "push")
+    ats_decided = ats_wins + ats_losses
+
+    return {
+        "games": games,
+        "su_wins": su_wins,
+        "su_losses": games - su_wins,
+        "su_pct": round(100 * su_wins / games, 1) if games else None,
+        "ats_wins": ats_wins,
+        "ats_losses": ats_losses,
+        "ats_pushes": ats_pushes,
+        "ats_decided": ats_decided,
+        "ats_pct": round(100 * ats_wins / ats_decided, 1) if ats_decided else None,
+    }
+
+
+#How many of the week's recommended games the front page lists before handing off
+#to the full board, and the edge a game has to clear to be called recommended --
+#the same threshold tracking.py grades a flagged pick at.
+HOME_RECOMMENDED_COUNT = 6
+RECOMMENDED_MIN_EDGE = 3
+
+
+def recommended_games(predictions, min_edge=RECOMMENDED_MIN_EDGE, limit=HOME_RECOMMENDED_COUNT):
+    """The games where the model disagrees with the market most, biggest first.
+
+    Takes rows that have already been through clean_predictions, so a missing line
+    is None rather than NaN. Games with no posted line have no edge to rank on and
+    are left out rather than sorted to the bottom.
+    """
+    scored = []
+    for pick in predictions:
+        diff = pick.get('spread_diff')
+        if diff is None:
+            continue
+        edge = abs(float(diff))
+        if edge >= min_edge:
+            scored.append((edge, pick))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [pick for _, pick in scored[:limit]]
 
 
 def featured_pick_from(predictions_df, sport, min_edge):
@@ -291,8 +338,9 @@ def robots():
 
 @app.route("/login")
 def login():
-    """Login page"""
-    return render_template("login.html")
+    """Accounts were removed -- everything is public now. The route is kept so
+    old links, bookmarks and search results land on the site rather than a 404."""
+    return redirect("/")
 
 @app.route("/auth-callback", methods=["POST"])
 def auth_callback():
@@ -323,9 +371,10 @@ def auth_callback():
 
 @app.route("/logout")
 def logout():
-    """Logout user"""
+    """Nothing is gated any more, but a visitor may still be carrying a session
+    cookie from when it was. Clear it and send them to the front page."""
     session.clear()
-    return render_template("logout.html")
+    return redirect("/")
 
 # Try to import football predictor
 try:
@@ -371,6 +420,13 @@ except Exception as e:
     basketball_logos = {}
     basketball_colors = {}
 
+#Team brand colours are drawn straight onto a near-black panel, where the several
+#that are effectively black disappear. See colors.py.
+import colors
+
+app.add_template_filter(colors.readable, "team_color")
+
+
 #Loading happens off the startup path: gunicorn kills a worker that takes longer than
 #its timeout to boot, and downloading plus fitting both models can take that long on
 #a small instance. Started again from the first request in a forked worker (see
@@ -380,10 +436,8 @@ app.before_request(ensure_loader_running)
 
 @app.route("/")
 def index():
-    """Landing page -- one free featured pick, a rankings preview and last week's
-    graded results (PUBLIC)."""
-    user_logged_in, _ = current_user_state()
-
+    """Landing page: the play of the day, the week's strongest games, a rankings
+    preview and last week's graded results. Public, like every page."""
     #Last week's results come from Firestore, not the models, so they show even
     #while the models are still loading after a restart.
     try:
@@ -408,14 +462,22 @@ def index():
         if not featured_pick:
             print("No featured pick found (no games with sufficient edge)")
 
+        football_rows = clean_predictions(football_preds)
+
         return render_template('index.html',
                              recent_results=recent_results,
+                             results_recap=results_summary(recent_results),
                              team_logos=football_logos,
+                             team_colors=football_colors,
                              featured_pick=featured_pick,
+                             #The same slate the featured pick was drawn from: the
+                             #front page lists its strongest games, the board has all.
+                             recommended=recommended_games(football_rows),
+                             football_total=len(football_rows),
+                             football_week=football_predictor.next_week,
                              football_top10=football_predictor.FBS_rankings.head(10).to_dict('records'),
                              basketball_top10=basketball_predictor.D1_rankings.head(10).to_dict('records'),
                              basketball_logos=basketball_logos,
-                             user_logged_in=user_logged_in,
                              highlights=MODEL_HIGHLIGHTS,
                              football_model_fully_trained=football_predictor.model_fully_trained)
     except Exception as e:
@@ -424,19 +486,22 @@ def index():
             traceback.print_exc()
         return render_template('index.html',
                              recent_results=recent_results,
+                             results_recap=results_summary(recent_results),
                              team_logos=football_logos,
+                             team_colors=football_colors,
                              featured_pick=None,
+                             recommended=[],
+                             football_total=0,
+                             football_week=getattr(football_predictor, 'next_week', None) if FOOTBALL_AVAILABLE else None,
                              football_top10=[],
                              basketball_top10=[],
                              basketball_logos=basketball_logos,
-                             user_logged_in=user_logged_in,
                              highlights=MODEL_HIGHLIGHTS,
                              football_model_fully_trained=getattr(football_predictor, 'model_fully_trained', True) if FOOTBALL_AVAILABLE else True)
 
 @app.route("/football")
-@login_required
 def football():
-    """Football predictions page (LOGIN REQUIRED)"""
+    """Football predictions page."""
     try:
         require_predictors()
 
@@ -460,6 +525,8 @@ def football():
         return render_template('football.html',
                              predictions=clean_predictions(predictions_df),
                              selected_week=week,
+                             week_options=REGULAR_SEASON_WEEKS,
+                             next_week=football_predictor.next_week,
                              conferences=conference_options(football_predictor, football_conferences),
                              selected_conference=conference,
                              team_logos=football_logos,
@@ -473,6 +540,8 @@ def football():
         return render_template('football.html',
                              predictions=[],
                              conferences=football_conferences,
+                             week_options=REGULAR_SEASON_WEEKS,
+                             next_week=getattr(football_predictor, 'next_week', 1) if FOOTBALL_AVAILABLE else 1,
                              selected_week=str(getattr(football_predictor, 'next_week', 1)) if FOOTBALL_AVAILABLE else "1",
                              selected_conference="All",
                              team_logos=football_logos,
@@ -481,9 +550,8 @@ def football():
                              weeks_completed=getattr(football_predictor, 'weeks_completed', 0) if FOOTBALL_AVAILABLE else 0)
 
 @app.route("/basketball")
-@login_required
 def basketball():
-    """Basketball predictions page (LOGIN REQUIRED)"""
+    """Basketball predictions page."""
     try:
         require_predictors()
 
@@ -495,6 +563,8 @@ def basketball():
         return render_template('basketball.html',
                              predictions=clean_predictions(predictions_df),
                              conferences=conference_options(basketball_predictor, basketball_conferences),
+                             team_logos=basketball_logos,
+                             team_colors=basketball_colors,
                              selected_conference=conference)
     except Exception as e:
         if not isinstance(e, DataStillLoading):
@@ -503,12 +573,13 @@ def basketball():
         return render_template('basketball.html',
                              predictions=[],
                              conferences=basketball_conferences,
+                             team_logos=basketball_logos,
+                             team_colors=basketball_colors,
                              selected_conference="All")
 
 @app.route("/rankings")
-@login_required
 def rankings():
-    """Rankings page (LOGIN REQUIRED)"""
+    """Rankings page."""
     try:
         require_predictors()
 
@@ -517,13 +588,17 @@ def rankings():
         
         return render_template('rankings.html',
                              football_rankings=football_rankings,
-                             basketball_rankings=basketball_rankings)
+                             basketball_rankings=basketball_rankings,
+                             football_logos=football_logos,
+                             basketball_logos=basketball_logos)
     except Exception as e:
         if not isinstance(e, DataStillLoading):
             print(f"Error loading rankings: {e}")
-        return render_template('rankings.html', 
-                             football_rankings=[], 
-                             basketball_rankings=[])
+        return render_template('rankings.html',
+                             football_rankings=[],
+                             basketball_rankings=[],
+                             football_logos=football_logos,
+                             basketball_logos=basketball_logos)
     
 @app.route("/example")
 def example():
@@ -532,8 +607,6 @@ def example():
     Exists so visitors can see exactly what the real /football page looks like and
     how to read it, even in the off-season when there are no real games to show.
     """
-    user_logged_in, user_email = current_user_state()
-
     sample_predictions = [
         {
             "home": "Ohio State", "away": "Michigan", "predicted_winner": "Ohio State",
@@ -558,11 +631,9 @@ def example():
     ]
 
     return render_template('example.html',
-                         user_logged_in=user_logged_in,
                          predictions=sample_predictions)
 
 @app.route("/matchup")
-@login_required
 def matchup():
     """Unified matchup predictor -- pick a sport, pick two teams, get a number.
     Replaces the old /football/custom and /basketball/custom pages, which now
@@ -615,7 +686,6 @@ def basketball_custom():
     return redirect("/matchup?sport=basketball")
 
 @app.route("/api/predict", methods=["POST"])
-@login_required
 def predict_matchup():
     """Run one hypothetical game through whichever sport's model was asked for."""
     data = request.json or {}
@@ -664,10 +734,9 @@ def predict_matchup():
 
 @app.route("/terms")
 def terms():
-    user_logged_in, user_email = current_user_state()
-    return render_template("terms.html",
-                           user_logged_in=user_logged_in,
-                           user_email=user_email)
+    return render_template("terms.html")
+
+
 import stripe
 
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')

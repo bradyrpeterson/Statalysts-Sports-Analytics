@@ -1,514 +1,492 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
-    <title>Matchup Predictor | Statalysts</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <!-- Top Bar -->
-    <div class="top-bar">
-        <div class="top-bar-content">
-            <div class="season-info">2026 College Football Season</div>
-            <div class="top-nav-links">
-                <a href="/logout">Log Out</a>
+{% extends "base.html" %}
+{% set active = 'matchup' %}
+{% from "_icons.html" import icon_chevron_down, icon_empty %}
+
+{% block title %}Matchup Predictor | Statalysts{% endblock %}
+{% block dateline %}Run any two rated teams through the model{% endblock %}
+
+{% block content %}
+<section class="wrap phead">
+    <div class="phead-row">
+        <div>
+            <span class="eyebrow">Predictor</span>
+            <h1>Any two teams.<br>Any time of year.</h1>
+            <p>Pick a sport and two rated teams. The model returns the same projected margin and win
+               probability it uses for the published board &mdash; there is no separate demo model behind
+               this page.</p>
+        </div>
+    </div>
+</section>
+
+<section class="wrap pred-shell">
+    {% if not sports %}
+    <div class="empty">
+        {{ icon_empty() }}
+        <h3>The predictor is warming up</h3>
+        <p>Ratings are still being fit, so there are no teams to choose between yet. This usually clears
+           within a few minutes of a restart.</p>
+    </div>
+    {% else %}
+
+    {% if sports|length > 1 %}
+    <div class="toolbar" style="border-top:none; padding-top:0">
+        <div class="seg" id="sport-seg" role="tablist" aria-label="Choose a sport">
+            <span class="seg-thumb" id="sport-thumb"></span>
+            {% if sports.football %}
+            <button type="button" data-sport="football" role="tab"
+                    class="{{ 'on' if default_sport == 'football' }}"
+                    aria-selected="{{ 'true' if default_sport == 'football' else 'false' }}">Football</button>
+            {% endif %}
+            {% if sports.basketball %}
+            <button type="button" data-sport="basketball" role="tab"
+                    class="{{ 'on' if default_sport == 'basketball' }}"
+                    aria-selected="{{ 'true' if default_sport == 'basketball' else 'false' }}">Basketball</button>
+            {% endif %}
+        </div>
+        <span class="meta" id="team-count"></span>
+    </div>
+    {% endif %}
+
+    <div class="pred-slab">
+        <div class="pred-pickers">
+            <div class="picker" data-side="away">
+                <span class="picker-label" id="away-label">Away team</span>
+                <button type="button" class="picker-btn" id="away-btn"
+                        aria-haspopup="listbox" aria-expanded="false" aria-labelledby="away-label away-value">
+                    <span class="picker-logo" id="away-logo"></span>
+                    <span class="picker-val placeholder" id="away-value">Select a team</span>
+                    {{ icon_chevron_down(16, 'picker-caret') }}
+                </button>
+                <div class="pop" id="away-pop" hidden>
+                    <input type="text" class="pop-search" id="away-search" placeholder="Search teams"
+                           autocomplete="off" spellcheck="false" aria-label="Search away teams">
+                    <ul class="pop-list" id="away-list" role="listbox" aria-label="Away team"></ul>
+                </div>
             </div>
+
+            <button type="button" class="swap" id="swap" aria-label="Swap home and away">
+                <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                    <path d="M7 4v13m0 0l-3-3m3 3l3-3M17 20V7m0 0l3 3m-3-3l-3 3" fill="none"
+                          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+            </button>
+
+            <div class="picker" data-side="home">
+                <span class="picker-label" id="home-label">Home team</span>
+                <button type="button" class="picker-btn" id="home-btn"
+                        aria-haspopup="listbox" aria-expanded="false" aria-labelledby="home-label home-value">
+                    <span class="picker-logo" id="home-logo"></span>
+                    <span class="picker-val placeholder" id="home-value">Select a team</span>
+                    {{ icon_chevron_down(16, 'picker-caret') }}
+                </button>
+                <div class="pop" id="home-pop" hidden>
+                    <input type="text" class="pop-search" id="home-search" placeholder="Search teams"
+                           autocomplete="off" spellcheck="false" aria-label="Search home teams">
+                    <ul class="pop-list" id="home-list" role="listbox" aria-label="Home team"></ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="pred-controls">
+            <label class="switch">
+                <input type="checkbox" id="neutral">
+                <span class="switch-track"></span>
+                <span>Neutral site &mdash; no home advantage</span>
+            </label>
+            <button type="button" class="btn btn-solid btn-lg" id="run">Run the model</button>
+        </div>
+
+        <p class="pred-error" id="error" hidden></p>
+    </div>
+
+    <div class="pred-figures" id="figures">
+        <div class="pred-figure">
+            <span class="k">Projected winner</span>
+            <span class="v" id="f-winner"><span class="nodata">&mdash;</span></span>
+        </div>
+        <div class="pred-figure">
+            <span class="k">Projected margin</span>
+            <span class="v" id="f-margin"><span class="nodata">&mdash;</span></span>
+        </div>
+        <div class="pred-figure">
+            <span class="k">Win probability</span>
+            <span class="v" id="f-prob"><span class="nodata">&mdash;</span></span>
         </div>
     </div>
 
-    <!-- Main Header -->
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="PetersonPredicts Logo" class="logo">
-                <a href="/" class="brand-name">Statalysts</a>
-            </div>
-            <nav class="main-nav">
-                <a href="/">Home</a>
-                <a href="/football">Football</a>
-                <a href="/basketball">Basketball<span class="beta-tag">Beta</span></a>
-                <a href="/matchup" class="active">Matchup</a>
-                <a href="/rankings">Rankings</a>
-                <a href="/example">Example</a>
-            </nav>
-            <div class="header-actions">
-                <a href="/manage-subscription" class="user-badge">Profile Information</a>
-            </div>
+    <div class="pred-result" id="result" hidden>
+        <div class="pred-verdict">
+            <span class="pred-verdict-team" id="v-team"></span>
+            <span class="pred-verdict-by">by</span>
+            <span class="pred-verdict-margin" id="v-margin"></span>
         </div>
-    </header>
 
-    <!-- Page Header -->
-    <div class="page-header">
-        <div class="page-header-content">
-            <h1 class="page-title">Matchup Predictor</h1>
-            <p class="page-subtitle">Predict any matchup using our model</p>
+        <div class="pred-split">
+            <div class="pred-split-heads">
+                <div class="pred-split-head">
+                    <span class="crest-blank" id="s-away-logo"></span>
+                    <div>
+                        <span class="pred-split-pct" id="s-away-pct"></span>
+                        <span class="pred-split-name" id="s-away-name"></span>
+                    </div>
+                </div>
+                <div class="pred-split-head r">
+                    <span class="crest-blank" id="s-home-logo"></span>
+                    <div>
+                        <span class="pred-split-pct" id="s-home-pct"></span>
+                        <span class="pred-split-name" id="s-home-name"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="pred-bar" id="bar" role="img" aria-label="Win probability">
+                <span id="bar-away"></span>
+                <span id="bar-home"></span>
+            </div>
         </div>
+
+        <p class="pred-note" id="note"></p>
     </div>
+    {% endif %}
+</section>
+{% endblock %}
 
-    <!-- Content -->
-    <div class="content">
-        {% if not sports %}
-        <div class="empty-state">
-            <div class="empty-title">Predictor unavailable</div>
-            <div class="empty-text">The models aren't loaded right now. Try again in a few minutes.</div>
-        </div>
-        {% else %}
-        <div class="mp-shell">
-            <div class="mp-sports" role="tablist" aria-label="Choose a sport">
-                {% if sports.football %}
-                <button type="button" class="mp-sport" data-sport="football" role="tab"
-                        aria-selected="{{ 'true' if default_sport == 'football' else 'false' }}">College Football</button>
-                {% endif %}
-                {% if sports.basketball %}
-                <button type="button" class="mp-sport" data-sport="basketball" role="tab"
-                        aria-selected="{{ 'true' if default_sport == 'basketball' else 'false' }}">College Basketball</button>
-                {% endif %}
-            </div>
 
-            <div class="mp-card">
-                <div class="mp-pickers">
-                    <div class="mp-picker" data-side="away">
-                        <span class="mp-label" id="mp-away-label">Away Team</span>
-                        <button type="button" class="mp-select" id="mp-away-btn"
-                                aria-haspopup="listbox" aria-expanded="false" aria-labelledby="mp-away-label mp-away-value">
-                            <span class="mp-select-logo" id="mp-away-logo"></span>
-                            <span class="mp-select-value mp-placeholder" id="mp-away-value">Select a team</span>
-                            <svg class="mp-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                                <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"
-                                      stroke-linecap="round" stroke-linejoin="round"></path>
-                            </svg>
-                        </button>
-                        <div class="mp-pop" id="mp-away-pop" hidden>
-                            <input type="text" class="mp-search" id="mp-away-search" placeholder="Search teams"
-                                   autocomplete="off" spellcheck="false" aria-label="Search away teams">
-                            <ul class="mp-list" id="mp-away-list" role="listbox" aria-label="Away team"></ul>
-                        </div>
-                    </div>
+{% block scripts %}
+<script>
+(function () {
+    var SPORTS = {{ sports|tojson }};
+    var NEUTRAL = { away: '#414a57', home: '#6b7684' };
+    var sport = {{ default_sport|tojson }};
+    var picked = { away: null, home: null };
 
-                    <button type="button" class="mp-swap" id="mp-swap" aria-label="Swap home and away">
-                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                            <path d="M7 4v13m0 0l-3-3m3 3l3-3M17 20V7m0 0l3 3m-3-3l-3 3" fill="none"
-                                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                        </svg>
-                    </button>
+    function el(id) { return document.getElementById(id); }
+    function teams() { return SPORTS[sport] || []; }
+    if (!el('run')) return;
 
-                    <div class="mp-picker" data-side="home">
-                        <span class="mp-label" id="mp-home-label">Home Team</span>
-                        <button type="button" class="mp-select" id="mp-home-btn"
-                                aria-haspopup="listbox" aria-expanded="false" aria-labelledby="mp-home-label mp-home-value">
-                            <span class="mp-select-logo" id="mp-home-logo"></span>
-                            <span class="mp-select-value mp-placeholder" id="mp-home-value">Select a team</span>
-                            <svg class="mp-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                                <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"
-                                      stroke-linecap="round" stroke-linejoin="round"></path>
-                            </svg>
-                        </button>
-                        <div class="mp-pop" id="mp-home-pop" hidden>
-                            <input type="text" class="mp-search" id="mp-home-search" placeholder="Search teams"
-                                   autocomplete="off" spellcheck="false" aria-label="Search home teams">
-                            <ul class="mp-list" id="mp-home-list" role="listbox" aria-label="Home team"></ul>
-                        </div>
-                    </div>
-                </div>
+    /* ---------- team pickers ---------- */
 
-                <div class="mp-controls">
-                    <label class="mp-neutral">
-                        <input type="checkbox" id="mp-neutral">
-                        <span>Neutral site</span>
-                    </label>
-                    <button type="button" class="mp-run" id="mp-run">Generate Prediction</button>
-                </div>
+    function logoNode(team, cls) {
+        if (team && team.logo) {
+            var img = document.createElement('img');
+            img.src = team.logo;
+            img.alt = '';
+            img.className = cls;
+            return img;
+        }
+        var span = document.createElement('span');
+        span.className = cls + ' crest-blank';
+        return span;
+    }
 
-                <p class="mp-error" id="mp-error" hidden></p>
-            </div>
+    function setLogo(slotId, team, cls) {
+        var node = logoNode(team, cls);
+        node.id = slotId;
+        el(slotId).replaceWith(node);
+    }
 
-            <div class="mp-result" id="mp-result" hidden>
-                <div class="mp-result-head">
-                    <div class="mp-result-team">
-                        <span class="mp-result-logo" id="mp-r-away-logo"></span>
-                        <span class="mp-result-name" id="mp-r-away-name"></span>
-                    </div>
-                    <span class="mp-result-at" id="mp-r-at">@</span>
-                    <div class="mp-result-team">
-                        <span class="mp-result-logo" id="mp-r-home-logo"></span>
-                        <span class="mp-result-name" id="mp-r-home-name"></span>
-                    </div>
-                </div>
+    function renderList(side, filter) {
+        var list = el(side + '-list');
+        var needle = (filter || '').trim().toLowerCase();
+        var other = side === 'away' ? picked.home : picked.away;
+        list.innerHTML = '';
 
-                <div class="mp-chart">
-                    <div class="mp-chart-side">
-                        <span class="mp-chart-logo" id="mp-c-away-logo"></span>
-                        <span class="mp-chart-pct" id="mp-c-away-pct"></span>
-                        <span class="mp-chart-name" id="mp-c-away-name"></span>
-                    </div>
+        var matches = teams().filter(function (t) {
+            return !needle || t.name.toLowerCase().indexOf(needle) !== -1;
+        });
 
-                    <svg class="mp-donut" viewBox="0 0 120 120" role="img" id="mp-donut" aria-label="Win probability">
-                        <circle cx="60" cy="60" r="45" fill="none" stroke="var(--bg-tertiary)" stroke-width="20"></circle>
-                        <circle cx="60" cy="60" r="45" fill="none" stroke-width="20" id="mp-arc-away"
-                                transform="rotate(-90 60 60)"></circle>
-                        <circle cx="60" cy="60" r="45" fill="none" stroke-width="20" id="mp-arc-home"
-                                transform="rotate(-90 60 60)"></circle>
-                        <text x="60" y="54" class="mp-donut-cap">WIN</text>
-                        <text x="60" y="70" class="mp-donut-cap">PROB</text>
-                    </svg>
+        if (!matches.length) {
+            var none = document.createElement('li');
+            none.className = 'opt opt-empty';
+            none.textContent = 'No teams match';
+            list.appendChild(none);
+            return;
+        }
 
-                    <div class="mp-chart-side">
-                        <span class="mp-chart-logo" id="mp-c-home-logo"></span>
-                        <span class="mp-chart-pct" id="mp-c-home-pct"></span>
-                        <span class="mp-chart-name" id="mp-c-home-name"></span>
-                    </div>
-                </div>
-
-                <div class="mp-stats">
-                    <div class="mp-stat">
-                        <span class="mp-stat-label">Projected Winner</span>
-                        <span class="mp-stat-value" id="mp-s-winner"></span>
-                    </div>
-                    <div class="mp-stat">
-                        <span class="mp-stat-label">Projected Margin</span>
-                        <span class="mp-stat-value" id="mp-s-margin"></span>
-                    </div>
-                    <div class="mp-stat">
-                        <span class="mp-stat-label">Win Probability</span>
-                        <span class="mp-stat-value" id="mp-s-prob"></span>
-                    </div>
-                </div>
-
-                <p class="mp-note" id="mp-note"></p>
-            </div>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-grid">
-                <div class="footer-brand">
-                    <div class="footer-logo-section">
-                        <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="footer-logo">
-                        <div class="footer-brand-name">Statalysts</div>
-                    </div>
-                    <p class="footer-description">
-                        Advanced AI-powered sports analytics and predictions for college football and basketball.
-                    </p>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Product</h4>
-                    <div class="footer-links">
-                        <a href="/football">Football</a>
-                        <a href="/basketball">Basketball</a>
-                        <a href="/matchup">Matchup</a>
-                        <a href="/rankings">Rankings</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Company</h4>
-                    <div class="footer-links">
-                        <a href="/">Home</a>
-                        <a href="mailto:contact@statalysts.com">contact@statalysts.com</a>
-                        <a href="/terms">Terms &amp; Conditions</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Account</h4>
-                    <div class="footer-links">
-                        <a href="/logout">Log Out</a>
-                    </div>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <div>&copy; 2026 Statalysts. All rights reserved.</div>
-                <div class="footer-legal">
-                    <span>For entertainment purposes only</span>
-                </div>
-            </div>
-        </div>
-    </footer>
-
-    <script>
-    (function () {
-        const SPORTS = {{ sports|tojson }};
-        const NEUTRAL_COLORS = { away: '#5a6270', home: '#a8b2c8' };
-        const CIRC = 2 * Math.PI * 45;
-
-        let sport = {{ default_sport|tojson }};
-        const picked = { away: null, home: null };
-
-        const el = (id) => document.getElementById(id);
-        const teams = () => SPORTS[sport] || [];
-
-        function logoMarkup(team, cls) {
-            if (team && team.logo) {
-                const img = document.createElement('img');
-                img.src = team.logo;
-                img.alt = '';
-                img.className = cls;
-                return img;
+        matches.forEach(function (team) {
+            var li = document.createElement('li');
+            li.className = 'opt';
+            li.setAttribute('role', 'option');
+            li.tabIndex = -1;
+            var taken = other && other.name === team.name;
+            var selected = picked[side] && picked[side].name === team.name;
+            li.setAttribute('aria-selected', selected ? 'true' : 'false');
+            if (selected) li.classList.add('sel');
+            if (taken) {
+                li.classList.add('taken');
+                li.setAttribute('aria-disabled', 'true');
             }
-            const span = document.createElement('span');
-            span.className = cls;
-            return span;
-        }
+            li.appendChild(logoNode(team, 'opt-logo'));
+            var name = document.createElement('span');
+            name.textContent = team.name;
+            li.appendChild(name);
+            if (!taken) li.addEventListener('click', function () { choose(side, team); });
+            list.appendChild(li);
+        });
+    }
 
-        function setLogo(slotId, team, cls) {
-            const node = logoMarkup(team, cls);
-            node.id = slotId;
-            el(slotId).replaceWith(node);
-        }
+    function openPicker(side) {
+        closeAll(side);
+        var pop = el(side + '-pop');
+        var search = el(side + '-search');
+        pop.hidden = false;
+        el(side + '-btn').setAttribute('aria-expanded', 'true');
+        search.value = '';
+        renderList(side, '');
+        search.focus();
+    }
 
-        /* ---------- team pickers ---------- */
+    function closePicker(side) {
+        el(side + '-pop').hidden = true;
+        el(side + '-btn').setAttribute('aria-expanded', 'false');
+    }
 
-        function renderList(side, filter) {
-            const list = el('mp-' + side + '-list');
-            const needle = (filter || '').trim().toLowerCase();
-            const other = side === 'away' ? picked.home : picked.away;
-            list.innerHTML = '';
+    function closeAll(except) {
+        ['away', 'home'].forEach(function (s) { if (s !== except) closePicker(s); });
+    }
 
-            const matches = teams().filter(function (t) {
-                return !needle || t.name.toLowerCase().includes(needle);
-            });
+    function choose(side, team) {
+        picked[side] = team;
+        var value = el(side + '-value');
+        value.textContent = team.name;
+        value.classList.remove('placeholder');
+        setLogo(side + '-logo', team, 'picker-logo');
+        closePicker(side);
+        el(side + '-btn').focus();
+        hideError();
+    }
 
-            if (!matches.length) {
-                const li = document.createElement('li');
-                li.className = 'mp-option mp-option-empty';
-                li.textContent = 'No teams match';
-                list.appendChild(li);
-                return;
+    function clearPick(side) {
+        picked[side] = null;
+        var value = el(side + '-value');
+        value.textContent = 'Select a team';
+        value.classList.add('placeholder');
+        setLogo(side + '-logo', null, 'picker-logo');
+    }
+
+    ['away', 'home'].forEach(function (side) {
+        el(side + '-btn').addEventListener('click', function () {
+            if (el(side + '-pop').hidden) { openPicker(side); } else { closePicker(side); }
+        });
+        el(side + '-search').addEventListener('input', function (e) { renderList(side, e.target.value); });
+        el(side + '-search').addEventListener('keydown', function (e) {
+            var first = el(side + '-list').querySelector('.opt:not(.taken):not(.opt-empty)');
+            if (e.key === 'Escape') {
+                closePicker(side);
+                el(side + '-btn').focus();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (first) first.focus();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (first) first.click();
             }
-
-            matches.forEach(function (team) {
-                const li = document.createElement('li');
-                li.className = 'mp-option';
-                li.setAttribute('role', 'option');
-                li.tabIndex = -1;
-                const isTaken = other && other.name === team.name;
-                const isSelected = picked[side] && picked[side].name === team.name;
-                li.setAttribute('aria-selected', isSelected ? 'true' : 'false');
-                if (isSelected) li.classList.add('selected');
-                if (isTaken) {
-                    li.classList.add('taken');
-                    li.setAttribute('aria-disabled', 'true');
-                }
-                li.appendChild(logoMarkup(team, 'mp-option-logo'));
-                const name = document.createElement('span');
-                name.className = 'mp-option-name';
-                name.textContent = team.name;
-                li.appendChild(name);
-                if (!isTaken) {
-                    li.addEventListener('click', function () { choose(side, team); });
-                }
-                list.appendChild(li);
-            });
-        }
-
-        function openPicker(side) {
-            closeAll(side);
-            const pop = el('mp-' + side + '-pop');
-            const search = el('mp-' + side + '-search');
-            pop.hidden = false;
-            el('mp-' + side + '-btn').setAttribute('aria-expanded', 'true');
-            search.value = '';
-            renderList(side, '');
-            search.focus();
-        }
-
-        function closePicker(side) {
-            el('mp-' + side + '-pop').hidden = true;
-            el('mp-' + side + '-btn').setAttribute('aria-expanded', 'false');
-        }
-
-        function closeAll(except) {
-            ['away', 'home'].forEach(function (s) { if (s !== except) closePicker(s); });
-        }
-
-        function choose(side, team) {
-            picked[side] = team;
-            const value = el('mp-' + side + '-value');
-            value.textContent = team.name;
-            value.classList.remove('mp-placeholder');
-            setLogo('mp-' + side + '-logo', team, 'mp-select-logo');
-            closePicker(side);
-            el('mp-' + side + '-btn').focus();
-            hideError();
-        }
-
-        function clearPick(side) {
-            picked[side] = null;
-            const value = el('mp-' + side + '-value');
-            value.textContent = 'Select a team';
-            value.classList.add('mp-placeholder');
-            setLogo('mp-' + side + '-logo', null, 'mp-select-logo');
-        }
-
-        ['away', 'home'].forEach(function (side) {
-            el('mp-' + side + '-btn').addEventListener('click', function () {
-                if (el('mp-' + side + '-pop').hidden) { openPicker(side); } else { closePicker(side); }
-            });
-            el('mp-' + side + '-search').addEventListener('input', function (e) {
-                renderList(side, e.target.value);
-            });
-            el('mp-' + side + '-search').addEventListener('keydown', function (e) {
-                if (e.key === 'Escape') {
-                    closePicker(side);
-                    el('mp-' + side + '-btn').focus();
-                } else if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    const first = el('mp-' + side + '-list').querySelector('.mp-option:not(.taken):not(.mp-option-empty)');
-                    if (first) first.focus();
-                } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    const first = el('mp-' + side + '-list').querySelector('.mp-option:not(.taken):not(.mp-option-empty)');
-                    if (first) first.click();
-                }
-            });
-            el('mp-' + side + '-list').addEventListener('keydown', function (e) {
-                const options = Array.prototype.slice.call(
-                    el('mp-' + side + '-list').querySelectorAll('.mp-option:not(.taken):not(.mp-option-empty)'));
-                const at = options.indexOf(document.activeElement);
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    if (options[at + 1]) options[at + 1].focus();
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    if (at <= 0) { el('mp-' + side + '-search').focus(); } else { options[at - 1].focus(); }
-                } else if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (document.activeElement.click) document.activeElement.click();
-                } else if (e.key === 'Escape') {
-                    closePicker(side);
-                    el('mp-' + side + '-btn').focus();
-                }
-            });
         });
-
-        document.addEventListener('click', function (e) {
-            if (!e.target.closest('.mp-picker')) closeAll();
+        el(side + '-list').addEventListener('keydown', function (e) {
+            var options = Array.prototype.slice.call(
+                el(side + '-list').querySelectorAll('.opt:not(.taken):not(.opt-empty)'));
+            var at = options.indexOf(document.activeElement);
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (options[at + 1]) options[at + 1].focus();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (at <= 0) { el(side + '-search').focus(); } else { options[at - 1].focus(); }
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (document.activeElement.click) document.activeElement.click();
+            } else if (e.key === 'Escape') {
+                closePicker(side);
+                el(side + '-btn').focus();
+            }
         });
+    });
 
-        /* ---------- sport switching ---------- */
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('.picker')) closeAll();
+    });
 
-        const sportButtons = Array.prototype.slice.call(document.querySelectorAll('.mp-sport'));
-        sportButtons.forEach(function (btn) {
-            if (btn.dataset.sport === sport) btn.classList.add('active');
-            btn.addEventListener('click', function () {
-                if (btn.dataset.sport === sport) return;
-                sport = btn.dataset.sport;
-                sportButtons.forEach(function (b) {
-                    const on = b.dataset.sport === sport;
-                    b.classList.toggle('active', on);
-                    b.setAttribute('aria-selected', on ? 'true' : 'false');
-                });
-                clearPick('away');
-                clearPick('home');
-                closeAll();
-                el('mp-result').hidden = true;
-                hideError();
+    /* ---------- sport switching ---------- */
+
+    var seg = el('sport-seg');
+    var buttons = seg ? Array.prototype.slice.call(seg.querySelectorAll('button')) : [];
+    var thumb = el('sport-thumb');
+
+    function place(btn) {
+        if (!thumb || !btn) return;
+        thumb.style.width = btn.offsetWidth + 'px';
+        thumb.style.transform = 'translateX(' + (btn.offsetLeft - 3) + 'px)';
+    }
+
+    function showCount() {
+        var count = el('team-count');
+        if (count) count.textContent = teams().length + ' rated teams';
+    }
+
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (btn.dataset.sport === sport) return;
+            sport = btn.dataset.sport;
+            buttons.forEach(function (b) {
+                var on = b === btn;
+                b.classList.toggle('on', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
             });
-        });
-
-        el('mp-swap').addEventListener('click', function () {
-            const away = picked.away, home = picked.home;
-            clearPick('away'); clearPick('home');
-            if (home) choose('away', home);
-            if (away) choose('home', away);
+            place(btn);
+            clearPick('away');
+            clearPick('home');
             closeAll();
-        });
-
-        /* ---------- prediction ---------- */
-
-        function showError(message) {
-            const box = el('mp-error');
-            box.textContent = message;
-            box.hidden = false;
-        }
-
-        function hideError() { el('mp-error').hidden = true; }
-
-        function colorFor(team, side) {
-            return (team && team.color) ? team.color : NEUTRAL_COLORS[side];
-        }
-
-        function render(data, neutral) {
-            const away = picked.away, home = picked.home;
-
-            setLogo('mp-r-away-logo', away, 'mp-result-logo');
-            setLogo('mp-r-home-logo', home, 'mp-result-logo');
-            el('mp-r-away-name').textContent = away.name;
-            el('mp-r-home-name').textContent = home.name;
-            el('mp-r-at').textContent = neutral ? 'vs' : '@';
-
-            setLogo('mp-c-away-logo', away, 'mp-chart-logo');
-            setLogo('mp-c-home-logo', home, 'mp-chart-logo');
-            el('mp-c-away-pct').textContent = data.away_prob.toFixed(1) + '%';
-            el('mp-c-home-pct').textContent = data.home_prob.toFixed(1) + '%';
-            el('mp-c-away-name').textContent = away.name;
-            el('mp-c-home-name').textContent = home.name;
-
-            const awayLen = CIRC * data.away_prob / 100;
-            const awayArc = el('mp-arc-away');
-            awayArc.setAttribute('stroke', colorFor(away, 'away'));
-            awayArc.setAttribute('stroke-dasharray', awayLen.toFixed(2) + ' ' + (CIRC - awayLen).toFixed(2));
-            const homeArc = el('mp-arc-home');
-            homeArc.setAttribute('stroke', colorFor(home, 'home'));
-            homeArc.setAttribute('stroke-dasharray', (CIRC - awayLen).toFixed(2) + ' ' + awayLen.toFixed(2));
-            homeArc.setAttribute('stroke-dashoffset', (-awayLen).toFixed(2));
-            el('mp-donut').setAttribute('aria-label',
-                away.name + ' ' + data.away_prob.toFixed(1) + ' percent, ' +
-                home.name + ' ' + data.home_prob.toFixed(1) + ' percent');
-
-            const winnerProb = data.winner === home.name ? data.home_prob : data.away_prob;
-            el('mp-s-winner').textContent = data.winner;
-            el('mp-s-margin').textContent = data.margin.toFixed(1) + ' pts';
-            el('mp-s-prob').textContent = winnerProb.toFixed(1) + '%';
-            el('mp-note').textContent = neutral
-                ? 'Neutral site'
-                : home.name + ' is credited with home advantage.';
-
-            el('mp-result').hidden = false;
-        }
-
-        el('mp-run').addEventListener('click', async function () {
+            el('result').hidden = true;
+            resetFigures();
             hideError();
-            if (!picked.away || !picked.home) { showError('Pick both teams.'); return; }
-            if (picked.away.name === picked.home.name) { showError('Pick two different teams.'); return; }
-
-            const button = el('mp-run');
-            const neutral = el('mp-neutral').checked;
-            button.disabled = true;
-            button.textContent = 'Generating...';
-            try {
-                const response = await fetch('/api/predict', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sport: sport,
-                        home: picked.home.name,
-                        away: picked.away.name,
-                        neutral: neutral
-                    })
-                });
-                const data = await response.json();
-                if (data.success) {
-                    render(data, neutral);
-                    el('mp-result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                } else {
-                    el('mp-result').hidden = true;
-                    showError(data.error || 'Prediction failed.');
-                }
-            } catch (err) {
-                el('mp-result').hidden = true;
-                showError('Network error. Please try again.');
-            } finally {
-                button.disabled = false;
-                button.textContent = 'Generate Prediction';
-            }
+            showCount();
         });
-    })();
-    </script>
-</body>
-</html>
+    });
+
+    el('swap').addEventListener('click', function () {
+        var away = picked.away, home = picked.home;
+        clearPick('away'); clearPick('home');
+        if (home) choose('away', home);
+        if (away) choose('home', away);
+        closeAll();
+    });
+
+    /* ---------- running the model ---------- */
+
+    function showError(message) {
+        var box = el('error');
+        box.textContent = message;
+        box.hidden = false;
+    }
+    function hideError() { el('error').hidden = true; }
+
+    /* Mirrors colors.readable in colors.py: this page gets raw team colours in its
+       JSON payload rather than through the Jinja filter, and several teams' brand
+       colours are effectively black against the dark panel. */
+    function readableColor(hex, fallback) {
+        var text = String(hex || '').trim().replace(/^#/, '');
+        if (text.length === 3) text = text.split('').map(function (c) { return c + c; }).join('');
+        if (!/^[0-9a-f]{6}$/i.test(text)) return fallback;
+        var rgb = [0, 2, 4].map(function (i) { return parseInt(text.substr(i, 2), 16); });
+        for (var step = 0; step <= 20; step++) {
+            var t = step / 20;
+            var mixed = rgb.map(function (c) { return Math.round(c + (255 - c) * t); });
+            if (Math.max.apply(null, mixed) / 255 >= 0.45) {
+                return '#' + mixed.map(function (c) {
+                    return ('0' + c.toString(16)).slice(-2);
+                }).join('');
+            }
+        }
+        return fallback;
+    }
+
+    function colorFor(team, side) {
+        return readableColor(team && team.color, NEUTRAL[side]);
+    }
+
+    function resetFigures() {
+        ['f-winner', 'f-margin', 'f-prob'].forEach(function (id) {
+            el(id).innerHTML = '<span class="nodata">&mdash;</span>';
+        });
+    }
+
+    /* Counts a figure up to its value — brief, and skipped when the OS asks. */
+    function countTo(node, target, suffix, decimals) {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            node.textContent = target.toFixed(decimals) + suffix;
+            return;
+        }
+        var start = performance.now(), dur = 520;
+        (function step(now) {
+            var t = Math.min(1, (now - start) / dur);
+            var eased = 1 - Math.pow(1 - t, 3);
+            node.textContent = (target * eased).toFixed(decimals) + suffix;
+            if (t < 1) requestAnimationFrame(step);
+        })(start);
+    }
+
+    function render(data, neutral) {
+        var away = picked.away, home = picked.home;
+
+        el('v-team').textContent = data.winner;
+        countTo(el('v-margin'), data.margin, '', 1);
+
+        setLogo('s-away-logo', away, 'pred-split-logo');
+        setLogo('s-home-logo', home, 'pred-split-logo');
+        el('s-away-name').textContent = away.name;
+        el('s-home-name').textContent = home.name;
+        countTo(el('s-away-pct'), data.away_prob, '%', 1);
+        countTo(el('s-home-pct'), data.home_prob, '%', 1);
+
+        var barAway = el('bar-away'), barHome = el('bar-home');
+        barAway.style.background = colorFor(away, 'away');
+        barHome.style.background = colorFor(home, 'home');
+        barAway.style.width = '0%';
+        barHome.style.width = '0%';
+        requestAnimationFrame(function () {
+            barAway.style.width = data.away_prob + '%';
+            barHome.style.width = data.home_prob + '%';
+        });
+        el('bar').setAttribute('aria-label',
+            away.name + ' ' + data.away_prob.toFixed(1) + ' percent, ' +
+            home.name + ' ' + data.home_prob.toFixed(1) + ' percent');
+
+        var winnerProb = data.winner === home.name ? data.home_prob : data.away_prob;
+        el('f-winner').textContent = data.winner;
+        el('f-margin').textContent = data.margin.toFixed(1) + ' pts';
+        el('f-prob').textContent = winnerProb.toFixed(1) + '%';
+        el('note').textContent = neutral
+            ? 'Neutral site — no home advantage applied.'
+            : home.name + ' is credited with home advantage.';
+
+        el('result').hidden = false;
+    }
+
+    el('run').addEventListener('click', async function () {
+        hideError();
+        if (!picked.away || !picked.home) { showError('Pick both teams first.'); return; }
+        if (picked.away.name === picked.home.name) { showError('Pick two different teams.'); return; }
+
+        var button = el('run');
+        var neutral = el('neutral').checked;
+        button.disabled = true;
+        button.textContent = 'Running…';
+        try {
+            var response = await fetch('/api/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sport: sport,
+                    home: picked.home.name,
+                    away: picked.away.name,
+                    neutral: neutral
+                })
+            });
+            var data = await response.json();
+            if (data.success) {
+                render(data, neutral);
+                el('result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                el('result').hidden = true;
+                showError(data.error || 'The model could not run that matchup.');
+            }
+        } catch (err) {
+            el('result').hidden = true;
+            showError('Network error. Try again in a moment.');
+        } finally {
+            button.disabled = false;
+            button.textContent = 'Run the model';
+        }
+    });
+
+    showCount();
+    requestAnimationFrame(function () {
+        var on = seg ? seg.querySelector('button.on') : null;
+        place(on || buttons[0]);
+    });
+    window.addEventListener('resize', function () {
+        var on = seg ? seg.querySelector('button.on') : null;
+        place(on || buttons[0]);
+    });
+})();
+</script>
+{% endblock %}

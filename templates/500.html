@@ -1,39 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
-    <title>Something Went Wrong | Statalysts</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="logo">
-                <a href="/" class="brand-name">Statalysts</a>
-            </div>
-        </div>
-    </header>
-
-    <div class="error-page">
-        <div class="error-page-content">
-            <div class="error-code">500</div>
-            <h1>Something went wrong on our end.</h1>
-            <p>Our model hit a snag processing that request. It's on us — try again in a moment.</p>
-            <a href="/" class="btn btn-primary btn-large">Back to Home</a>
-        </div>
+{% extends "base.html" %}
+{% block title %}Something went wrong | Statalysts{% endblock %}
+{% block content %}
+<section class="wrap errpage">
+    <div class="errcode fig">500</div>
+    <h1>Something broke on our side.</h1>
+    <p>The request hit an error before it could be answered. That's on us — it isn't anything you did.
+       Try again in a moment.</p>
+    <div class="hero-actions">
+        <a href="/" class="btn btn-solid btn-lg">Back to the front page</a>
     </div>
-
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-bottom">
-                <div>&copy; 2026 Statalysts. All rights reserved.</div>
-            </div>
-        </div>
-    </footer>
-</body>
-</html>
+</section>
+{% endblock %}
