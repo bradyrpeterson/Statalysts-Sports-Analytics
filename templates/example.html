@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0a0a0b">
     <title>How to Read a Prediction | Statalysts</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 {% from "_icons.html" import icon_lock %}
+{% from "_macros.html" import predictions_table, table_expand_script %}
 <body>
     <div class="top-bar">
         <div class="top-bar-content">
@@ -63,12 +64,12 @@
                 <div class="feature-description">Away team on top, home team on bottom. Whichever team the model favors to win is highlighted.</div>
             </div>
             <div class="feature-card">
-                <div class="feature-title">Model Spread</div>
+                <div class="feature-title">Model Line</div>
                 <div class="feature-description">Our model's own predicted margin. "Ohio State -9.5" means the model expects Ohio State to win by 9.5 points.</div>
             </div>
             <div class="feature-card">
                 <div class="feature-title">Vegas Line</div>
-                <div class="feature-description">The actual sportsbook spread for the same game, for comparison. Shows N/A if a line isn't posted yet.</div>
+                <div class="feature-description">The actual sportsbook spread for the same game, for comparison. Shows &mdash; if a line isn't posted yet.</div>
             </div>
             <div class="feature-card">
                 <div class="feature-title">Edge</div>
@@ -76,72 +77,11 @@
             </div>
             <div class="feature-card">
                 <div class="feature-title">Win %</div>
-                <div class="feature-description">The model's estimated probability that its predicted winner actually wins the game.</div>
+                <div class="feature-description">The model's estimated probability that its predicted winner actually wins the game. Click a row to see the full breakdown.</div>
             </div>
         </div>
 
-        <table class="predictions-table">
-            <thead>
-                <tr>
-                    <th>Matchup</th>
-                    <th>Model Spread</th>
-                    <th>Vegas Line</th>
-                    <th>Edge</th>
-                    <th>Win %</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for pred in predictions %}
-                <tr class="{% if pred.spread_diff and pred.spread_diff|abs >= 5 %}edge-high{% elif pred.spread_diff and pred.spread_diff|abs >= 3 %}edge-medium{% else %}edge-low{% endif %}">
-                    <td>
-                        <div class="matchup-cell">
-                            <div class="team-cell {% if pred.predicted_winner == pred.away %}team-predicted{% endif %}">
-                                {{ pred.away }}
-                            </div>
-                            <div class="vs-separator">@</div>
-                            <div class="team-cell {% if pred.predicted_winner == pred.home %}team-predicted{% endif %}">
-                                {{ pred.home }}
-                            </div>
-                            {% if pred.neutral_site %}
-                            <div class="neutral-indicator">(Neutral Site)</div>
-                            {% endif %}
-                        </div>
-                    </td>
-                    <td>
-                        <strong>{{ pred.predicted_winner }}</strong> -{{ pred.margin|round(1) }}
-                    </td>
-                    <td>
-                        {% if pred.betting_spread is not none %}
-                            {% if pred.betting_spread < 0 %}
-                            {{ pred.home }} {{ pred.betting_spread }}
-                            {% else %}
-                            {{ pred.away }} -{{ pred.betting_spread }}
-                            {% endif %}
-                        {% else %}
-                        <span class="no-data">N/A</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if pred.spread_diff is not none %}
-                        <span class="edge-value {% if pred.spread_diff|abs >= 5 %}high{% elif pred.spread_diff|abs >= 3 %}medium{% endif %}">
-                            +{{ pred.spread_diff|abs|round(1) }}
-                        </span>
-                        {% else %}
-                        <span class="no-data">N/A</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <div class="confidence-bar-cell">
-                            <div class="confidence-bar-small">
-                                <div class="confidence-fill-small" data-width="{{ pred.prob|round(1) }}"></div>
-                            </div>
-                            <span class="confidence-text-small">{{ pred.prob|round(1) }}%</span>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        {{ predictions_table(predictions, team_logos={}, table_id='example', high_edge=5, medium_edge=3) }}
 
         <div class="predictions-legend">
             <h4>Edge Legend</h4>
@@ -224,15 +164,6 @@
         </div>
     </footer>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.confidence-fill-small').forEach(function(el) {
-                var width = el.getAttribute('data-width');
-                if (width) {
-                    el.style.width = width + '%';
-                }
-            });
-        });
-    </script>
+    {{ table_expand_script() }}
 </body>
 </html>

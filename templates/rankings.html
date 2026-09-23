@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0a0a0b">
     <title>Rankings | Statalysts</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -26,7 +26,7 @@
     <header class="header">
         <div class="header-content">
             <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="PetersonPredicts Logo" class="logo">
+                <img src="{{ url_for('static', filename='favicon.png') }}" alt="Statalysts Logo" class="logo">
                 <a href="/" class="brand-name">Statalysts</a>
             </div>
             <nav class="main-nav">
@@ -59,14 +59,23 @@
                 <div class="rankings-header">
                     <h2 class="rankings-title">College Football</h2>
                 </div>
-                <table class="rankings-table">
-                    {% for team in football_rankings %}
-                    <tr>
-                        <td class="rank-number">{{ loop.index }}</td>
-                        <td class="team-name-col">{{ team.team }}</td>
-                        <td class="rating-col">{{ team.rating|round(2) }}</td>
-                    </tr>
-                    {% endfor %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="num">#</th>
+                            <th>Team</th>
+                            <th class="num">Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in football_rankings %}
+                        <tr>
+                            <td class="num tabular">{{ loop.index }}</td>
+                            <td class="dt-team-name">{{ team.team }}</td>
+                            <td class="num tabular">{{ team.rating|round(2) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
                 </table>
             </div>
 
@@ -75,14 +84,23 @@
                 <div class="rankings-header">
                     <h2 class="rankings-title">College Basketball</h2>
                 </div>
-                <table class="rankings-table">
-                    {% for team in basketball_rankings %}
-                    <tr>
-                        <td class="rank-number">{{ loop.index }}</td>
-                        <td class="team-name-col">{{ team.team }}</td>
-                        <td class="rating-col">{{ team.rating|round(2) }}</td>
-                    </tr>
-                    {% endfor %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="num">#</th>
+                            <th>Team</th>
+                            <th class="num">Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in basketball_rankings %}
+                        <tr>
+                            <td class="num tabular">{{ loop.index }}</td>
+                            <td class="dt-team-name">{{ team.team }}</td>
+                            <td class="num tabular">{{ team.rating|round(2) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
                 </table>
             </div>
         </div>

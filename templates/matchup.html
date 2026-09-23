@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0a0a0b">
     <title>Matchup Predictor | Statalysts</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -147,7 +147,7 @@
                     </div>
 
                     <svg class="mp-donut" viewBox="0 0 120 120" role="img" id="mp-donut" aria-label="Win probability">
-                        <circle cx="60" cy="60" r="45" fill="none" stroke="var(--bg-tertiary)" stroke-width="20"></circle>
+                        <circle cx="60" cy="60" r="45" fill="none" stroke="var(--bg-raised)" stroke-width="20"></circle>
                         <circle cx="60" cy="60" r="45" fill="none" stroke-width="20" id="mp-arc-away"
                                 transform="rotate(-90 60 60)"></circle>
                         <circle cx="60" cy="60" r="45" fill="none" stroke-width="20" id="mp-arc-home"
@@ -233,7 +233,7 @@
     <script>
     (function () {
         const SPORTS = {{ sports|tojson }};
-        const NEUTRAL_COLORS = { away: '#5a6270', home: '#a8b2c8' };
+        const NEUTRAL_COLORS = { away: '#5c5d63', home: '#9a9ba1' };
         const CIRC = 2 * Math.PI * 45;
 
         let sport = {{ default_sport|tojson }};

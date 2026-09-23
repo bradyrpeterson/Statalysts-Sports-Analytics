@@ -3,89 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0a0a0b">
     <title>Terms & Conditions | Statalysts</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         .terms-container {
-            max-width: 900px;
+            max-width: 720px;
             margin: 0 auto;
-            padding: 60px 20px;
-            color: #e5e7eb;
+            padding: 3.5rem 1.75rem 4rem;
+            color: var(--text);
         }
         .terms-header {
             text-align: center;
-            margin-bottom: 60px;
+            margin-bottom: 3rem;
         }
         .terms-title {
-            font-size: 2.5rem;
+            font-size: 1.9rem;
             font-weight: 800;
-            color: #fff;
-            margin-bottom: 10px;
+            color: var(--text);
+            margin-bottom: 0.4rem;
         }
         .terms-updated {
-            color: #9ca3af;
-            font-size: 0.9rem;
+            color: var(--text-faint);
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
         }
         .terms-section {
-            margin-bottom: 40px;
+            margin-bottom: 2.25rem;
         }
         .terms-section h2 {
-            font-size: 1.5rem;
+            font-size: 1.1rem;
             font-weight: 700;
-            color: #fff;
-            margin-bottom: 15px;
+            color: var(--text);
+            margin-bottom: 0.75rem;
         }
         .terms-section p {
-            line-height: 1.8;
-            margin-bottom: 15px;
-            color: #d1d5db;
+            line-height: 1.7;
+            margin-bottom: 0.85rem;
+            color: var(--text-dim);
+            font-size: 0.92rem;
         }
         .terms-section ul {
-            margin-left: 20px;
-            margin-bottom: 15px;
+            margin-left: 1.25rem;
+            margin-bottom: 0.85rem;
         }
         .terms-section li {
-            margin-bottom: 10px;
-            line-height: 1.8;
-            color: #d1d5db;
+            margin-bottom: 0.5rem;
+            line-height: 1.7;
+            color: var(--text-dim);
+            font-size: 0.92rem;
         }
         .highlight-box {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            border-radius: 8px;
-            padding: 20px;
-            margin: 30px 0;
+            background: var(--danger-dim);
+            border: 1px solid rgba(224, 96, 95, 0.3);
+            border-left: 3px solid var(--danger);
+            border-radius: var(--radius-sm);
+            padding: 1.25rem;
+            margin: 1.75rem 0;
         }
         .highlight-box h3 {
-            color: #ef4444;
+            color: var(--danger);
             font-weight: 700;
-            margin-bottom: 10px;
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
         }
         .highlight-box h3 svg {
             vertical-align: -3px;
             margin-right: 0.4rem;
         }
         .highlight-box p {
-            color: #fca5a5;
+            color: var(--text-dim);
             margin-bottom: 0;
+            font-size: 0.9rem;
         }
         .back-link {
             text-align: center;
-            margin-top: 60px;
+            margin-top: 3rem;
         }
         .back-link a {
-            color: #3b82f6;
+            color: var(--text-dim);
             text-decoration: none;
             font-weight: 600;
+            font-size: 0.9rem;
         }
         .back-link a:hover {
-            text-decoration: underline;
+            color: var(--text);
         }
         .terms-section a {
-            color: #3b82f6;
+            color: var(--accent-text);
         }
         .terms-section a:hover {
             text-decoration: underline;
@@ -98,7 +105,6 @@
         <div class="top-bar-content">
             <div class="season-info">Terms & Conditions</div>
             <div class="top-nav-links"></div>
-            </div>
         </div>
     </div>
 

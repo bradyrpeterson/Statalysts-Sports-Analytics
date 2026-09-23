@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0a0a0b">
     <title>Statalysts | Machine Learning Sports Analytics & Predictions</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 {% from "_icons.html" import icon_lock, icon_chart, icon_brain, icon_bolt, icon_dollar, icon_trending_up %}
+{% from "_macros.html" import results_table, table_expand_script %}
 <body>
     <div class="top-bar">
         <div class="top-bar-content">
@@ -53,8 +54,8 @@
         <div class="hero-content">
             <div class="hero-left">
                 <div class="hero-header">
-                    <span class="hero-label">Machine Learning Analytics</span>
-                    <h1>Sports Predictions Built on <span class="text-gradient">Advanced Machine Learning</span></h1>
+                    <span class="hero-label">// machine learning sports analytics</span>
+                    <h1>Sports predictions built on <span class="text-gradient">advanced machine learning</span></h1>
                     <p class="hero-description">
                         Every team carries a power rating fit on point margins across the season, anchored to a preseason projection and pulled toward its own results as the evidence accumulates.
                     </p>
@@ -67,11 +68,11 @@
     </section>
 
     {% if not football_model_fully_trained %}
-    <div class="preview-content">
+    <div class="preview-content" style="padding-top: 1.75rem;">
         <div class="model-training-notice">
             <span class="model-training-notice-icon">⚠️</span>
             <div class="model-training-notice-text">
-                <strong>Football model still warming up.</strong> Not enough of this season's games have been played yet, so ratings are still leaning on preseason projections and last season's results. 
+                <strong>Football model still warming up.</strong> Not enough of this season's games have been played yet, so ratings are still leaning on preseason projections and last season's results.
             </div>
         </div>
     </div>
@@ -91,76 +92,13 @@
             {% endif %}
 
             {% if recent_results %}
-            <h2 class="section-title">How Last Week's Recommended Games Finished</h2>
-            <div class="results-grid">
-                {% for r in recent_results %}
-                <details class="result-card">
-                    <summary class="result-summary">
-                        <div class="result-head">
-                            <span class="result-date">{{ r.date }}</span>
-                            <span class="result-tier {{ r.tier }}">{{ r.edge|round(1) }} pt edge</span>
-                            {% if r.provisional %}<span class="result-tier provisional" title="Early-season pick: shown here, but held out of the track record until the model has four weeks of results">Provisional</span>{% endif %}
-                        </div>
-                        <div class="result-teams">
-                            <div class="result-team {% if r.actual_winner == r.away %}won{% endif %}">
-                                {% if team_logos.get(r.away) %}<img src="{{ team_logos[r.away] }}" class="result-logo" alt="">{% endif %}
-                                <span class="result-team-name">{{ r.away }}</span>
-                                <span class="result-score">{{ r.away_score }}</span>
-                            </div>
-                            <div class="result-team {% if r.actual_winner == r.home %}won{% endif %}">
-                                {% if team_logos.get(r.home) %}<img src="{{ team_logos[r.home] }}" class="result-logo" alt="">{% endif %}
-                                <span class="result-team-name">{{ r.home }}</span>
-                                <span class="result-score">{{ r.home_score }}</span>
-                            </div>
-                        </div>
-                        <div class="result-foot">
-                            <div class="result-outcomes">
-                                <span class="result-chip {{ 'win' if r.ml_correct else 'loss' }}">
-                                    ML {{ '&check;'|safe if r.ml_correct else '&times;'|safe }}
-                                </span>
-                                <span class="result-chip {{ r.ats_result or 'none' }}">
-                                    Spread {% if r.ats_result == 'win' %}&check;{% elif r.ats_result == 'loss' %}&times;{% elif r.ats_result == 'push' %}&ndash;{% else %}&ndash;{% endif %}
-                                </span>
-                            </div>
-                            <span class="result-chevron" aria-hidden="true"></span>
-                        </div>
-                    </summary>
-
-                    <div class="result-detail">
-                        <div class="result-line">
-                            <span class="result-line-label">We projected</span>
-                            <span class="result-line-value">{{ r.predicted_winner }} by {{ r.model_margin|abs|round(1) }}{% if r.win_prob %} &middot; {{ r.win_prob|round(0)|int }}%{% endif %}</span>
-                        </div>
-                        <div class="result-line">
-                            <span class="result-line-label">Final</span>
-                            <span class="result-line-value">{{ r.actual_winner }} by {{ r.actual_margin }}</span>
-                        </div>
-                        {% if r.betting_spread is not none %}
-                        <div class="result-line">
-                            <span class="result-line-label">Vegas line</span>
-                            <span class="result-line-value">{% if r.betting_spread < 0 %}{{ r.home }} {{ r.betting_spread }}{% else %}{{ r.away }} -{{ r.betting_spread }}{% endif %}</span>
-                        </div>
-                        {% endif %}
-                        {% if r.recommended_team %}
-                        <div class="result-line">
-                            <span class="result-line-label">We recommended</span>
-                            <span class="result-line-value">
-                                {{ r.recommended_team }}
-                                <span class="result-tier {{ r.tier }}">{{ 'Green' if r.tier == 'high' else 'Yellow' }}</span>
-                            </span>
-                        </div>
-                        {% endif %}
-                        <div class="result-line">
-                            <span class="result-line-label">How it finished</span>
-                            <span class="result-line-value">
-                                <span class="result-chip {{ 'win' if r.ml_correct else 'loss' }}">Moneyline {{ 'won' if r.ml_correct else 'lost' }}</span>
-                                <span class="result-chip {{ r.ats_result or 'none' }}">Spread {{ r.ats_result if r.ats_result else 'n/a' }}</span>
-                            </span>
-                        </div>
-                    </div>
-                </details>
-                {% endfor %}
+            <div class="section-header">
+                <div>
+                    <span class="section-eyebrow">01 &middot; Track Record</span>
+                    <h2 class="section-title">How Last Week's Recommended Games Finished</h2>
+                </div>
             </div>
+            {{ results_table(recent_results, team_logos, table_id='results') }}
             {% endif %}
         </div>
     </section>
@@ -169,7 +107,10 @@
     <section class="featured-section">
         <div class="featured-content">
             <div class="section-header">
-                <h2 class="section-title">Today's Featured Pick</h2>
+                <div>
+                    <span class="section-eyebrow">02 &middot; Featured Pick</span>
+                    <h2 class="section-title">Today's Featured Pick</h2>
+                </div>
                 <span class="section-badge">Free Preview</span>
             </div>
             <div class="featured-pick">
@@ -197,7 +138,7 @@
                 </div>
                 <div class="pick-sidebar">
                     <div class="pick-stat">
-                        <span class="pick-stat-label">Model Spread</span>
+                        <span class="pick-stat-label">Model Line</span>
                         <span class="pick-stat-value">{{ featured_pick.predicted_winner }} -{{ featured_pick.margin }}</span>
                     </div>
                     {% if featured_pick.betting_spread %}
@@ -246,10 +187,13 @@
     <section id="predictions-preview" class="preview-section">
         <div class="preview-content">
             <div class="section-header">
-                <h2 class="section-title">Daily Predictions</h2>
-                <p class="section-subtitle">Machine learning powered predictions with proven edge detection</p>
+                <div>
+                    <span class="section-eyebrow">03 &middot; Predictions</span>
+                    <h2 class="section-title">Daily Predictions</h2>
+                    <p class="section-subtitle">Machine learning powered predictions with proven edge detection</p>
+                </div>
             </div>
-            
+
             {% if not user_logged_in %}
             <div class="locked-preview">
                 <div class="preview-blur">
@@ -306,7 +250,10 @@
     <section id="rankings-preview" class="preview-section">
         <div class="preview-content">
             <div class="section-header">
-                <h2 class="section-title">Power Rankings</h2>
+                <div>
+                    <span class="section-eyebrow">04 &middot; Rankings</span>
+                    <h2 class="section-title">Power Rankings</h2>
+                </div>
             </div>
             <div class="rank-tabs" role="tablist">
                 <button type="button" class="rank-tab active" data-sport="football" role="tab" aria-selected="true">College Football</button>
@@ -384,10 +331,13 @@
     <section class="model-explanation-section">
     <div class="model-content">
         <div class="section-header">
-            <h2 class="section-title">How Our Model Works</h2>
-            <p class="section-subtitle">Advanced machine learning trained on thousands of games</p>
+            <div>
+                <span class="section-eyebrow">05 &middot; How It Works</span>
+                <h2 class="section-title">How Our Model Works</h2>
+                <p class="section-subtitle">Advanced machine learning trained on thousands of games</p>
+            </div>
         </div>
-        
+
         <div class="model-steps">
             <!-- Step 1 -->
             <div class="model-step">
@@ -395,31 +345,31 @@
                 <div class="step-content">
                     <h3 class="step-title">1. Data Collection</h3>
                     <p class="step-description">
-                        We analyze 2,000+ games worth of comprehensive statistics and game outcomes. We include offensive efficiency, 
+                        We analyze 2,000+ games worth of comprehensive statistics and game outcomes. We include offensive efficiency,
                         defensive ratings, turnover ratios, and advanced metrics for every FBS or D1 team.
                     </p>
                 </div>
             </div>
-            
+
             <!-- Step 2 -->
             <div class="model-step">
                 <div class="step-icon">{{ icon_brain() }}</div>
                 <div class="step-content">
                     <h3 class="step-title">2. Machine Learning</h3>
                     <p class="step-description">
-                        Our regression model weighs dozens of factors to calculate team strength ratings. 
-                        The algorithm learns optimal weights from historical performance to maximize prediction accuracy. These weights learn from every game that is played. 
+                        Our regression model weighs dozens of factors to calculate team strength ratings.
+                        The algorithm learns optimal weights from historical performance to maximize prediction accuracy. These weights learn from every game that is played.
                     </p>
                 </div>
             </div>
-            
+
             <!-- Step 3 -->
             <div class="model-step">
                 <div class="step-icon">{{ icon_bolt() }}</div>
                 <div class="step-content">
                     <h3 class="step-title">3. Prediction Generation</h3>
                     <p class="step-description">
-                        For each matchup, the model considers team ratings, statistical differentials, 
+                        For each matchup, the model considers team ratings, statistical differentials,
                         home court advantage, and neutral site factors to predict the margin and win probability.
                         The model outputs the predicted winner, point margin along with the edge versus the vegas line
                     </p>
@@ -431,8 +381,9 @@
 
     <section class="pricing-section" id="get-started">
         <div class="pricing-content">
+            <span class="section-eyebrow" style="display:block;text-align:center;">06 &middot; Get Started</span>
             <h2 class="section-title centered">Free During Beta</h2>
-            <p class="section-subtitle">No payment, no trial period. Create an account for full access.</p>
+            <p class="section-subtitle" style="text-align:center;">No payment, no trial period. Create an account for full access.</p>
 
             <div class="pricing-card">
                 <div class="pricing-header">
@@ -556,6 +507,7 @@
         </div>
     </footer>
 
+    {{ table_expand_script() }}
     <script>
         document.querySelectorAll('.rank-tab').forEach(function(tab) {
             tab.addEventListener('click', function() {
@@ -579,17 +531,7 @@
                 el.style.width = width + '%';
             }
         });
-        
-        document.querySelectorAll('.confidence-fill-small').forEach(function(el) {
-            var width = el.getAttribute('data-width');
-            if (width) {
-                el.style.width = width + '%';
-            }
-        });
     });
-    </script>
-
-    <script>
     </script>
 </body>
 </html>

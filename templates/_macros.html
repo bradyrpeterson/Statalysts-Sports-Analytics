@@ -1,0 +1,193 @@
+{# Shared table components. One consistent table renders every list of games on
+   the site — upcoming predictions (football & basketball) and graded results —
+   instead of each page inventing its own card layout. #}
+
+{% macro predictions_table(predictions, team_logos, table_id, team_colors=None, high_edge=5, medium_edge=3) %}
+{% set team_colors = team_colors or {} %}
+<div class="table-wrap">
+<table class="data-table" id="{{ table_id }}">
+    <thead>
+        <tr>
+            <th>Matchup</th>
+            <th>Model Line</th>
+            <th>Vegas Line</th>
+            <th class="num">Edge</th>
+            <th class="num">Win&nbsp;%</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pred in predictions %}
+        {% set edge = pred.spread_diff|abs if (pred.spread_diff is not none and pred.spread_diff|string != 'nan') else none %}
+        {% set tier = 'high' if edge is not none and edge >= high_edge else ('medium' if edge is not none and edge >= medium_edge else '') %}
+        {% set row_id = table_id ~ '-' ~ loop.index %}
+        <tr class="is-clickable dt-row" data-detail="{{ row_id }}"
+            data-edge="{{ edge if edge is not none else -1 }}"
+            data-kickoff="{{ pred.kickoff_iso or '' }}"
+            data-day="{{ pred.game_date_display or 'Date TBD' }}">
+            <td>
+                <div class="dt-matchup">
+                    <div class="dt-team">
+                        {% if team_logos.get(pred.away) %}<img src="{{ team_logos[pred.away] }}" class="dt-team-logo" alt="">{% endif %}
+                        <span class="dt-team-name {% if pred.predicted_winner == pred.away %}picked{% endif %}">{{ pred.away }}</span>
+                        {% if pred.away_record %}<span class="dt-team-record">{{ pred.away_record }}</span>{% endif %}
+                    </div>
+                    <div class="dt-team">
+                        {% if team_logos.get(pred.home) %}<img src="{{ team_logos[pred.home] }}" class="dt-team-logo" alt="">{% endif %}
+                        <span class="dt-team-name {% if pred.predicted_winner == pred.home %}picked{% endif %}">{{ pred.home }}</span>
+                        {% if pred.home_record %}<span class="dt-team-record">{{ pred.home_record }}</span>{% endif %}
+                    </div>
+                    {% if pred.game_date_display or pred.neutral_site %}
+                    <div class="dt-meta">{% if pred.game_date_display %}{{ pred.game_date_display }}{% if pred.game_time_display %} &middot; {{ pred.game_time_display }}{% endif %}{% endif %}{% if pred.neutral_site %}{% if pred.game_date_display %} &middot; {% endif %}Neutral site{% endif %}</div>
+                    {% endif %}
+                </div>
+            </td>
+            <td class="num tabular"><strong>{{ pred.predicted_winner }}</strong> -{{ pred.margin|round(1) }}</td>
+            <td class="num tabular">
+                {% if pred.betting_spread is not none and pred.betting_spread|string != 'nan' %}
+                    {% if pred.betting_spread < 0 %}{{ pred.home }} {{ pred.betting_spread }}{% else %}{{ pred.away }} -{{ pred.betting_spread }}{% endif %}
+                {% else %}<span class="no-data">&mdash;</span>{% endif %}
+            </td>
+            <td class="num">
+                {% if edge is not none %}<span class="dt-edge {{ tier }}">{{ edge|round(1) }}</span>{% else %}<span class="no-data">&mdash;</span>{% endif %}
+            </td>
+            <td class="num tabular">{{ pred.prob|round(1) }}%</td>
+            <td>
+                <svg class="dt-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>
+            </td>
+        </tr>
+        <tr class="dt-detail-row dt-hidden" id="{{ row_id }}">
+            <td colspan="6">
+                {% set home_pct = pred.prob if pred.predicted_winner == pred.home else 100 - pred.prob %}
+                {% set away_pct = 100 - home_pct %}
+                {% set circ = 213.628 %}
+                {% set away_len = circ * away_pct / 100 %}
+                <div class="dt-confidence">
+                    <div class="dt-conf-team">
+                        {% if team_logos.get(pred.away) %}<img src="{{ team_logos[pred.away] }}" class="dt-conf-logo" alt="">{% endif %}
+                        <span class="dt-conf-pct">{{ away_pct|round(1) }}%</span>
+                        <span class="dt-conf-name">{{ pred.away }}</span>
+                    </div>
+                    <svg class="dt-donut" viewBox="0 0 84 84" role="img"
+                         aria-label="{{ pred.away }} {{ away_pct|round(1) }} percent, {{ pred.home }} {{ home_pct|round(1) }} percent">
+                        <circle cx="42" cy="42" r="34" fill="none" stroke="var(--bg-raised)" stroke-width="14"></circle>
+                        <circle cx="42" cy="42" r="34" fill="none" stroke-width="14"
+                                stroke="{{ team_colors.get(pred.away, '#5c5d63') }}"
+                                stroke-dasharray="{{ away_len|round(2) }} {{ (circ - away_len)|round(2) }}"
+                                transform="rotate(-90 42 42)"></circle>
+                        <circle cx="42" cy="42" r="34" fill="none" stroke-width="14"
+                                stroke="{{ team_colors.get(pred.home, '#9a9ba1') }}"
+                                stroke-dasharray="{{ (circ - away_len)|round(2) }} {{ away_len|round(2) }}"
+                                stroke-dashoffset="{{ (-away_len)|round(2) }}"
+                                transform="rotate(-90 42 42)"></circle>
+                        <text x="42" y="39" class="dt-donut-cap">WIN</text>
+                        <text x="42" y="50" class="dt-donut-cap">PROB</text>
+                    </svg>
+                    <div class="dt-conf-team">
+                        {% if team_logos.get(pred.home) %}<img src="{{ team_logos[pred.home] }}" class="dt-conf-logo" alt="">{% endif %}
+                        <span class="dt-conf-pct">{{ home_pct|round(1) }}%</span>
+                        <span class="dt-conf-name">{{ pred.home }}</span>
+                    </div>
+                </div>
+                {% if pred.location %}
+                <p class="dt-venue">{{ pred.location }}{% if pred.neutral_site %} &middot; Neutral Site{% endif %}</p>
+                {% elif pred.neutral_site %}
+                <p class="dt-venue">Neutral Site</p>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endmacro %}
+
+
+{% macro results_table(results, team_logos, table_id='results') %}
+<div class="table-wrap">
+<table class="data-table" id="{{ table_id }}">
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Matchup</th>
+            <th>We Recommended</th>
+            <th>ML</th>
+            <th>Spread</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in results %}
+        {% set row_id = table_id ~ '-' ~ loop.index %}
+        <tr class="is-clickable dt-row" data-detail="{{ row_id }}">
+            <td class="tabular dt-meta">{{ r.date }}</td>
+            <td>
+                <div class="dt-matchup">
+                    <div class="dt-team">
+                        {% if team_logos.get(r.away) %}<img src="{{ team_logos[r.away] }}" class="dt-team-logo" alt="">{% endif %}
+                        <span class="dt-team-name {% if r.actual_winner == r.away %}picked{% endif %}">{{ r.away }}</span>
+                        <span class="tabular">{{ r.away_score }}</span>
+                    </div>
+                    <div class="dt-team">
+                        {% if team_logos.get(r.home) %}<img src="{{ team_logos[r.home] }}" class="dt-team-logo" alt="">{% endif %}
+                        <span class="dt-team-name {% if r.actual_winner == r.home %}picked{% endif %}">{{ r.home }}</span>
+                        <span class="tabular">{{ r.home_score }}</span>
+                    </div>
+                </div>
+            </td>
+            <td>
+                {% if r.recommended_team %}
+                {{ r.recommended_team }} <span class="dt-chip {{ r.tier }}">{{ r.edge|round(1) }} pt</span>
+                {% if r.provisional %}<span class="dt-chip provisional" title="Early-season pick: held out of the track record until the model has four weeks of results">Provisional</span>{% endif %}
+                {% else %}<span class="no-data">&mdash;</span>{% endif %}
+            </td>
+            <td><span class="dt-chip {{ 'win' if r.ml_correct else 'loss' }}">{{ 'Won' if r.ml_correct else 'Lost' }}</span></td>
+            <td><span class="dt-chip {{ r.ats_result or 'none' }}">{{ r.ats_result|default('n/a', true)|capitalize }}</span></td>
+            <td>
+                <svg class="dt-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>
+            </td>
+        </tr>
+        <tr class="dt-detail-row dt-hidden" id="{{ row_id }}">
+            <td colspan="6">
+                <div class="dt-detail-grid">
+                    <div class="dt-stat">
+                        <div class="dt-stat-label">We Projected</div>
+                        <div class="dt-stat-value">{{ r.predicted_winner }} by {{ r.model_margin|abs|round(1) }}{% if r.win_prob %} &middot; {{ r.win_prob|round(0)|int }}%{% endif %}</div>
+                    </div>
+                    <div class="dt-stat">
+                        <div class="dt-stat-label">Final</div>
+                        <div class="dt-stat-value">{{ r.actual_winner }} by {{ r.actual_margin }}</div>
+                    </div>
+                    {% if r.betting_spread is not none %}
+                    <div class="dt-stat">
+                        <div class="dt-stat-label">Vegas Line</div>
+                        <div class="dt-stat-value">{% if r.betting_spread < 0 %}{{ r.home }} {{ r.betting_spread }}{% else %}{{ r.away }} -{{ r.betting_spread }}{% endif %}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endmacro %}
+
+
+{# Click-to-expand behaviour shared by every .data-table on the site. Call once
+   per page after the table(s) are in the DOM. #}
+{% macro table_expand_script() %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.data-table tbody tr.dt-row').forEach(function (row) {
+        row.addEventListener('click', function () {
+            var detail = document.getElementById(row.dataset.detail);
+            if (!detail) return;
+            var opening = detail.classList.contains('dt-hidden');
+            detail.classList.toggle('dt-hidden');
+            row.classList.toggle('dt-open', opening);
+        });
+    });
+});
+</script>
+{% endmacro %}
