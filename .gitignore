@@ -8,3 +8,4 @@ statalysts-venv/
 research/model_backtest/data/
 # Per-game backtest output; the summary CSVs alongside them are kept
 research/model_backtest/results/*_detail.csv
+.python-version
