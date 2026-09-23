@@ -1,537 +1,376 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#0a0a0b">
-    <title>Statalysts | Machine Learning Sports Analytics & Predictions</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-{% from "_icons.html" import icon_lock, icon_chart, icon_brain, icon_bolt, icon_dollar, icon_trending_up %}
-{% from "_macros.html" import results_table, table_expand_script %}
-<body>
-    <div class="top-bar">
-        <div class="top-bar-content">
-            <div class="season-info">2025-26 College Basketball Season | 2026 College Football Season</div>
-            <div class="top-nav-links"></div>
+{% extends "base.html" %}
+{% set active = 'home' %}
+{% from "_macros.html" import slate_board, results_table, rank_board, board_script, side, edge_legend %}
+{% from "_icons.html" import icon_arrow, icon_warning, icon_empty %}
+
+{% block title %}Statalysts | College football and basketball power ratings{% endblock %}
+
+{% block content %}
+
+{# --- HERO ------------------------------------------------------------- #}
+<section class="wrap hero">
+    <div class="hero-grid">
+        <div>
+            <span class="eyebrow">Statistical modelling &middot; College sport</span>
+            <h1 class="display display-xl">
+                Machine Learning College Predictions.<br>
+                <em>Each game predicted.</em>
+            </h1>
+            <p class="lede">
+                Statalysts fits a single power rating to every college football and basketball team from
+                the season's scoring margins, anchored to a preseason projection and pulled toward each
+                team's own results as the evidence accumulates. Those ratings produce a projected margin
+                and win probability for every upcoming game. Want to create your own matchup? Open the custom predictor and see how the model rates any two teams.
+            </p>
+            <div class="hero-actions">
+                <a href="/football" class="btn btn-solid btn-lg">This week's football board</a>
+                <a href="/matchup" class="btn btn-line btn-lg">Open the custom predictor</a>
+            </div>
+        </div>
+
+        <div class="hero-side">
+        <div class="hero-mark">
+            <img src="{{ url_for('static', filename='logo-mark.png') }}"
+                 alt="Statalysts" width="903" height="698">
+        </div>
+
+        <aside class="spec" aria-label="What the model covers">
+            <div class="spec-row"><span class="spec-key">Sports</span><span class="spec-val">Football &middot; Basketball</span></div>
+            <div class="spec-row"><span class="spec-key">Football scale</span><span class="spec-val">FBS &amp; FCS, one scale</span></div>
+            <div class="spec-row"><span class="spec-key">Basketball scale</span><span class="spec-val">Division I</span></div>
+            <div class="spec-row"><span class="spec-key">Ratings refit</span><span class="spec-val">Hourly</span></div>
+            <div class="spec-row"><span class="spec-key">Cost</span><span class="spec-val">Free</span></div>
+        </aside>
         </div>
     </div>
-
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="logo">
-                <a href="/" class="brand-name">Statalysts</a>
-            </div>
-            <nav class="main-nav">
-                <a href="/" class="active">Home</a>
-                {% if user_logged_in %}
-                <a href="/football">Football</a>
-                <a href="/basketball">Basketball<span class="beta-tag">Beta</span></a>
-                <a href="/matchup">Matchup</a>
-                <a href="/rankings">Rankings</a>
-                {% else %}
-                <a href="#predictions-preview" class="nav-locked">Predictions {{ icon_lock(14) }}</a>
-                <a href="#rankings-preview" class="nav-locked">Rankings {{ icon_lock(14) }}</a>
-                {% endif %}
-                <a href="/example">Example</a>
-            </nav>
-            <div class="header-actions">
-                {% if user_logged_in %}
-                <a href="/manage-subscription" class="user-badge">Profile Information</a>
-                <a href="/logout" class="btn-logout">Log Out</a>
-                {% else %}
-                <a href="/login" class="btn-login">Log In</a>
-                <a href="/login?tab=signup" class="btn-subscribe">Sign Up Free</a>
-                {% endif %}
-            </div>
-        </div>
-    </header>
-
-    <section class="hero">
-        <div class="hero-content">
-            <div class="hero-left">
-                <div class="hero-header">
-                    <span class="hero-label">// machine learning sports analytics</span>
-                    <h1>Sports predictions built on <span class="text-gradient">advanced machine learning</span></h1>
-                    <p class="hero-description">
-                        Every team carries a power rating fit on point margins across the season, anchored to a preseason projection and pulled toward its own results as the evidence accumulates.
-                    </p>
-                </div>
-            </div>
-            <div class="hero-logo-panel">
-                <img src="{{ url_for('static', filename='favicon.png') }}" alt="Statalysts Logo" class="hero-logo-img">
-            </div>
-        </div>
-    </section>
 
     {% if not football_model_fully_trained %}
-    <div class="preview-content" style="padding-top: 1.75rem;">
-        <div class="model-training-notice">
-            <span class="model-training-notice-icon">⚠️</span>
-            <div class="model-training-notice-text">
-                <strong>Football model still warming up.</strong> Not enough of this season's games have been played yet, so ratings are still leaning on preseason projections and last season's results.
+    <div class="notice" style="margin-top: var(--s7)">
+        {{ icon_warning(17) }}
+        <div><strong>The football model is still warming up.</strong> Too few of this season's games have
+        been played for the ratings to lean on them, so they are still weighted heavily toward the
+        preseason projection and last season's results.</div>
+    </div>
+    {% endif %}
+</section>
+
+
+{# --- PLAY OF THE DAY --------------------------------------------------- #}
+{% if featured_pick %}
+{% set fp = featured_pick %}
+{% set fp_logos = team_logos if fp.sport == 'football' else basketball_logos %}
+{% set fp_home_pct = fp.prob if fp.predicted_winner == fp.home else 100 - fp.prob %}
+<section class="wrap band band-tight reveal" id="play">
+    <div class="play">
+        <div class="play-head">
+            <span class="eyebrow">Play of the day</span>
+            <div class="play-tags">
+                <span class="chip">{{ fp.sport|title }}</span>
+                {% if fp.edge >= 7 %}<span class="chip high">Widest disagreement</span>
+                {% elif fp.edge >= 5 %}<span class="chip medium">Notable disagreement</span>{% endif %}
+                {% if fp.neutral_site %}<span class="chip">Neutral site</span>{% endif %}
+            </div>
+        </div>
+
+        <div class="play-body">
+            <div class="play-matchup">
+                <div class="play-side {{ 'picked' if fp.predicted_winner == fp.away }}">
+                    {% if fp_logos.get(fp.away) %}<img src="{{ fp_logos[fp.away] }}" alt="">{% else %}<span class="crest-blank"></span>{% endif %}
+                    <span class="play-team">{{ fp.away }}</span>
+                    <span class="play-pct">{{ (100 - fp_home_pct)|round(1) }}%</span>
+                </div>
+                <div class="play-at">{{ 'versus' if fp.neutral_site else 'at' }}</div>
+                <div class="play-side {{ 'picked' if fp.predicted_winner == fp.home }}">
+                    {% if fp_logos.get(fp.home) %}<img src="{{ fp_logos[fp.home] }}" alt="">{% else %}<span class="crest-blank"></span>{% endif %}
+                    <span class="play-team">{{ fp.home }}</span>
+                    <span class="play-pct">{{ fp_home_pct|round(1) }}%</span>
+                </div>
+
+                <div class="probrule" role="img" aria-label="{{ fp.predicted_winner }} win probability {{ fp.prob|round(1) }} percent">
+                    <span class="lead" data-w="{{ fp.prob|round(1) }}"></span>
+                    <span class="trail" data-w="{{ (100 - fp.prob)|round(1) }}"></span>
+                </div>
+                <p class="quiet" style="font-size:.9375rem; margin-top: var(--s4)">
+                    The model makes <strong>{{ fp.predicted_winner }}</strong> a
+                    {{ fp.margin }}-point favorite{% if fp.betting_spread %}, which is {{ fp.edge }} points
+                    clear of the market's line{% endif %}. This is the largest gap between the model and the
+                    market on {{ "today's" if fp.sport == 'basketball' else "this week's" }} board.
+                </p>
+            </div>
+
+            <div class="play-figures">
+                <div class="play-fig">
+                    <span class="play-fig-key">Model line</span>
+                    <span class="play-fig-val big">{{ fp.margin }}<span class="unit"> pts</span></span>
+                    <div class="cell-when" style="margin-top:4px">{{ fp.predicted_winner }}</div>
+                </div>
+                {% if fp.betting_spread %}
+                <div class="play-fig">
+                    <span class="play-fig-key">Market line</span>
+                    <span class="play-fig-val">{% if fp.betting_spread < 0 %}{{ fp.home }} {{ fp.betting_spread }}{% else %}{{ fp.away }} &minus;{{ fp.betting_spread }}{% endif %}</span>
+                </div>
+                <div class="play-fig">
+                    <span class="play-fig-key">Edge</span>
+                    <span class="play-fig-val edge-val">{{ fp.edge }}<span class="unit"> pts</span></span>
+                </div>
+                {% endif %}
+                <div class="play-fig">
+                    <span class="play-fig-key">Win probability</span>
+                    <span class="play-fig-val">{{ fp.prob|round(1) }}%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="play-foot">
+            <span class="meta">One game a day &middot; the widest gap on the board</span>
+            <a href="/{{ fp.sport }}" class="readon">See the full {{ fp.sport }} board {{ icon_arrow() }}</a>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+
+{# --- THIS WEEK'S RECOMMENDED GAMES ------------------------------------- #}
+<section class="wrap band reveal" id="slate">
+    <div class="shead">
+        <div class="shead-titles">
+            <span class="eyebrow">This week</span>
+            <h2>{% if football_week %}Week {{ football_week }} recommended games{% else %}Recommended games{% endif %}</h2>
+            <p>The games where the model disagrees most with the posted market line. A wide gap is a
+               measure of disagreement,click any game for the full breakdown.</p>
+        </div>
+        {% if football_total %}
+        <div class="shead-action">
+            <span class="meta">{{ football_total }} game{{ 's' if football_total != 1 }} this week</span>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if recommended %}
+        {{ slate_board(recommended, team_logos, 'home-slate', team_colors=team_colors,
+                       high_edge=5, medium_edge=3) }}
+        <div class="lockbar">
+            <div class="lockbar-text">
+                <div>
+                    <h4>Showing the {{ recommended|length }} widest gap{{ 's' if recommended|length != 1 }} of {{ football_total }} game{{ 's' if football_total != 1 }}</h4>
+                    <p>The full board can be filtered by conference and week, and sorted by edge or kickoff.</p>
+                </div>
+            </div>
+            <div class="lockbar-actions">
+                <a href="/football" class="btn btn-solid">See all {{ football_total }} games</a>
+                <a href="/basketball" class="btn btn-line">Basketball board</a>
+            </div>
+        </div>
+    {% elif football_total %}
+        <div class="empty">
+            {{ icon_empty() }}
+            <h3>Nothing stands out this week</h3>
+            <p>No game on the board is more than three points away from its market line. The full slate
+               is still there &mdash; the model just has no strong disagreement to report.</p>
+            <div class="hero-actions" style="justify-content:center; margin-top: var(--s5)">
+                <a href="/football" class="btn btn-line">See all {{ football_total }} games</a>
+            </div>
+        </div>
+    {% else %}
+        <div class="empty">
+            {{ icon_empty() }}
+            <h3>No games on the board</h3>
+            <p>Nothing is scheduled for the current week, or the ratings are still loading. Check back shortly.</p>
+        </div>
+    {% endif %}
+</section>
+
+
+{# --- LAST WEEK'S RESULTS ------------------------------------------------ #}
+{% if recent_results %}
+<section class="wrap band reveal" id="results">
+    <div class="shead">
+        <div class="shead-titles">
+            <span class="eyebrow">Last week</span>
+            <h2>How the recommended games finished</h2>
+            <p>Every game the model flagged on the most recently completed slate, graded on both the
+               outright winner and the spread. Click any game for the full breakdown. </p>
+        </div>
+    </div>
+
+    {% if results_recap %}
+    {% set rc = results_recap %}
+    <div class="recap">
+        <div class="recap-cell">
+            <span class="recap-k">Games graded</span>
+            <span class="recap-v"><span class="recap-record">{{ rc.games }}</span></span>
+        </div>
+        <div class="recap-cell">
+            <span class="recap-k">Straight up</span>
+            <span class="recap-v">
+                <span class="recap-record">{{ rc.su_wins }}&ndash;{{ rc.su_losses }}</span>
+                {% if rc.su_pct is not none %}<span class="recap-pct">{{ rc.su_pct }}%</span>{% endif %}
+            </span>
+        </div>
+        <div class="recap-cell">
+            <span class="recap-k">Against the spread</span>
+            <span class="recap-v">
+                {% if rc.ats_decided %}
+                <span class="recap-record">{{ rc.ats_wins }}&ndash;{{ rc.ats_losses }}{% if rc.ats_pushes %}&ndash;{{ rc.ats_pushes }}{% endif %}</span>
+                <span class="recap-pct">{{ rc.ats_pct }}%</span>
+                {% else %}
+                <span class="recap-record nodata">&mdash;</span>
+                {% endif %}
+            </span>
+        </div>
+    </div>
+    <p class="recap-note">
+        {%- if rc.games != rc.ats_decided %} {{ rc.games - rc.ats_decided }} game{{ 's' if (rc.games - rc.ats_decided) != 1 }}
+        had no posted line and {{ 'is' if (rc.games - rc.ats_decided) == 1 else 'are' }} left out of the spread record.{% endif %}
+    </p>
+    {% endif %}
+
+    {{ results_table(recent_results, team_logos, table_id='results', team_colors=team_colors) }}
+</section>
+{% endif %}
+
+
+{# --- POWER RANKINGS ----------------------------------------------------- #}
+<section class="wrap band reveal" id="rankings">
+    <div class="shead">
+        <div class="shead-titles">
+            <span class="eyebrow">Power ratings</span>
+            <h2>Top ten, both sports</h2>
+            <p>A rating is a team's strength in points. The difference between two ratings is the model's
+               projected margin on a neutral floor.</p>
+        </div>
+        <div class="shead-action">
+            <div class="seg" id="rank-seg">
+                <span class="seg-thumb" id="rank-thumb"></span>
+                <button type="button" class="on" data-sport="football">Football</button>
+                <button type="button" data-sport="basketball">Basketball</button>
             </div>
         </div>
     </div>
-    {% endif %}
 
-    <section id="track-record" class="preview-section">
-        <div class="preview-content">
-            {% if highlights %}
-            <div class="rankings-container highlights-grid">
-                {% for h in highlights %}
-                <div class="feature-card">
-                    <div class="feature-title">{{ h.sport|title }}</div>
-                    <div class="feature-description">{{ h.text }}</div>
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
+    <div data-rankpanel="football">
+        {% if football_top10 %}{{ rank_board(football_top10, team_logos) }}
+        {% else %}<div class="empty">{{ icon_empty() }}<h3>Ratings loading</h3><p>The football ratings are being refit. They will appear here shortly.</p></div>{% endif %}
+    </div>
+    <div data-rankpanel="basketball" hidden>
+        {% if basketball_top10 %}{{ rank_board(basketball_top10, basketball_logos) }}
+        {% else %}<div class="empty">{{ icon_empty() }}<h3>Ratings loading</h3><p>The basketball ratings are being refit. They will appear here shortly.</p></div>{% endif %}
+    </div>
 
-            {% if recent_results %}
-            <div class="section-header">
-                <div>
-                    <span class="section-eyebrow">01 &middot; Track Record</span>
-                    <h2 class="section-title">How Last Week's Recommended Games Finished</h2>
-                </div>
-            </div>
-            {{ results_table(recent_results, team_logos, table_id='results') }}
-            {% endif %}
-        </div>
-    </section>
-
-    {% if featured_pick %}
-    <section class="featured-section">
-        <div class="featured-content">
-            <div class="section-header">
-                <div>
-                    <span class="section-eyebrow">02 &middot; Featured Pick</span>
-                    <h2 class="section-title">Today's Featured Pick</h2>
-                </div>
-                <span class="section-badge">Free Preview</span>
-            </div>
-            <div class="featured-pick">
-                <div class="pick-main">
-                    {% if featured_pick.edge >= 7 %}
-                    <span class="pick-badge">High Value</span>
-                    {% elif featured_pick.edge >= 5 %}
-                    <span class="pick-badge medium">Medium Value</span>
-                    {% endif %}
-                    <div class="pick-matchup">
-                        <div class="pick-team {% if featured_pick.predicted_winner == featured_pick.home %}predicted{% endif %}">
-                            {{ featured_pick.home }}
-                        </div>
-                        <div class="pick-vs">vs</div>
-                        <div class="pick-team {% if featured_pick.predicted_winner == featured_pick.away %}predicted{% endif %}">
-                            {{ featured_pick.away }}
-                        </div>
-                    </div>
-                    <div class="pick-meta">
-                        <span>{{ featured_pick.sport|title }}</span>
-                        {% if featured_pick.neutral_site %}
-                        <span>Neutral Site</span>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="pick-sidebar">
-                    <div class="pick-stat">
-                        <span class="pick-stat-label">Model Line</span>
-                        <span class="pick-stat-value">{{ featured_pick.predicted_winner }} -{{ featured_pick.margin }}</span>
-                    </div>
-                    {% if featured_pick.betting_spread %}
-                    <div class="pick-stat">
-                        <span class="pick-stat-label">Vegas Line</span>
-                        <span class="pick-stat-value">
-                            {% if featured_pick.betting_spread < 0 %}
-                            {{ featured_pick.home }} {{ featured_pick.betting_spread }}
-                            {% else %}
-                            {{ featured_pick.away }} -{{ featured_pick.betting_spread }}
-                            {% endif %}
-                        </span>
-                    </div>
-                    <div class="pick-stat">
-                        <span class="pick-stat-label">Edge</span>
-                        <span class="pick-stat-value edge">+{{ featured_pick.edge }}</span>
-                    </div>
-                    {% endif %}
-                    <div>
-                        <div class="pick-stat">
-                            <span class="pick-stat-label">Win %</span>
-                            <span class="pick-stat-value">{{ featured_pick.prob|round(1) }}%</span>
-                        </div>
-                        <div class="confidence-bar">
-                            <div class="confidence-fill" data-width="{{ featured_pick.prob|round(1) }}"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="featured-cta">
-                <p>Click below to see {{ 'today\'s' if featured_pick.sport == 'basketball' else 'this week\'s' }} picks with predicted margins</p>
-                {% if user_logged_in %}
-                <a href="/{{ featured_pick.sport }}" class="btn btn-primary">View All Predictions</a>
-                {% else %}
-                <div class="locked-cta">
-                    <div class="lock-icon">{{ icon_lock() }}</div>
-                    <p>Create a free account to unlock all predictions</p>
-                    <a href="/login?tab=signup" class="btn btn-primary">Get Free Access</a>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </section>
-    {% endif %}
-
-    <section id="predictions-preview" class="preview-section">
-        <div class="preview-content">
-            <div class="section-header">
-                <div>
-                    <span class="section-eyebrow">03 &middot; Predictions</span>
-                    <h2 class="section-title">Daily Predictions</h2>
-                    <p class="section-subtitle">Machine learning powered predictions with proven edge detection</p>
-                </div>
-            </div>
-
-            {% if not user_logged_in %}
-            <div class="locked-preview">
-                <div class="preview-blur">
-                    <div class="sample-games">
-                        <div class="game-card blur">
-                            <div class="game-header">
-                                <span class="game-time">Today, 7:00 PM ET</span>
-                                <span class="edge-badge big">High Edge</span>
-                            </div>
-                            <div class="game-body">
-                                <div class="matchup">
-                                    <div class="team">Duke vs UNC</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="game-card blur">
-                            <div class="game-header">
-                                <span class="game-time">Today, 9:00 PM ET</span>
-                                <span class="edge-badge medium">Med Edge</span>
-                            </div>
-                            <div class="game-body">
-                                <div class="matchup">
-                                    <div class="team">Kansas vs Baylor</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="preview-lock-overlay">
-                    <div class="lock-content">
-                        <div class="lock-icon-big">{{ icon_lock() }}</div>
-                        <h3>Create a Free Account to Unlock Predictions</h3>
-                        <p>Get full access to daily predictions for both football and basketball with detailed edge analysis</p>
-                        <a href="/login?tab=signup" class="btn btn-large btn-primary">Create Free Account</a>
-                        <a href="/example" class="example-link">Not ready to sign up? See a worked example &rarr;</a>
-                    </div>
-                </div>
-            </div>
-            {% else %}
-            <div class="predictions-links">
-                <a href="/football" class="prediction-link-card">
-                    <h3>Football Predictions</h3>
-                    <p>View all FBS game predictions for the week</p>
-                </a>
-                <a href="/basketball" class="prediction-link-card">
-                    <h3>Basketball Predictions<span class="beta-tag">Beta</span></h3>
-                    <p>View all D1 game predictions for the day</p>
-                </a>
-            </div>
-            {% endif %}
-        </div>
-    </section>
-
-    <section id="rankings-preview" class="preview-section">
-        <div class="preview-content">
-            <div class="section-header">
-                <div>
-                    <span class="section-eyebrow">04 &middot; Rankings</span>
-                    <h2 class="section-title">Power Rankings</h2>
-                </div>
-            </div>
-            <div class="rank-tabs" role="tablist">
-                <button type="button" class="rank-tab active" data-sport="football" role="tab" aria-selected="true">College Football</button>
-                <button type="button" class="rank-tab" data-sport="basketball" role="tab" aria-selected="false">College Basketball</button>
-            </div>
-
-            <div class="rank-panel" data-sport="football">
-                <div class="rank-board">
-                    <div class="rank-row rank-head">
-                        <span class="rank-num">#</span>
-                        <span class="rank-logo"></span>
-                        <span class="rank-team">Team</span>
-                        <span class="rank-rating">Rating</span>
-                    </div>
-                    {% for team in football_top10 %}
-                    <div class="rank-row">
-                        <span class="rank-num">{{ loop.index }}</span>
-                        {% if team_logos.get(team.team) %}<img src="{{ team_logos[team.team] }}" class="rank-logo" alt="">{% else %}<span class="rank-logo"></span>{% endif %}
-                        <span class="rank-team">{{ team.team }}</span>
-                        <span class="rank-rating">{{ team.rating|round(1) }}</span>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% if not user_logged_in %}
-                <div class="rank-unlock">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                    </svg>
-                    <span>Create a free account to see full rankings</span>
-                    <a href="/login" class="btn btn-small btn-primary">Unlock Rankings</a>
-                </div>
-                {% else %}
-                <div class="rank-unlock">
-                    <a href="/rankings" class="btn btn-small btn-secondary">View Full Rankings</a>
-                </div>
-                {% endif %}
-            </div>
-
-            <div class="rank-panel" data-sport="basketball" hidden>
-                <div class="rank-board">
-                    <div class="rank-row rank-head">
-                        <span class="rank-num">#</span>
-                        <span class="rank-logo"></span>
-                        <span class="rank-team">Team</span>
-                        <span class="rank-rating">Rating</span>
-                    </div>
-                    {% for team in basketball_top10 %}
-                    <div class="rank-row">
-                        <span class="rank-num">{{ loop.index }}</span>
-                        {% if basketball_logos.get(team.team) %}<img src="{{ basketball_logos[team.team] }}" class="rank-logo" alt="">{% else %}<span class="rank-logo"></span>{% endif %}
-                        <span class="rank-team">{{ team.team }}</span>
-                        <span class="rank-rating">{{ team.rating|round(1) }}</span>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% if not user_logged_in %}
-                <div class="rank-unlock">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                    </svg>
-                    <span>Create a free account to see full rankings</span>
-                    <a href="/login" class="btn btn-small btn-primary">Unlock Rankings</a>
-                </div>
-                {% else %}
-                <div class="rank-unlock">
-                    <a href="/rankings" class="btn btn-small btn-secondary">View Full Rankings</a>
-                </div>
-                {% endif %}
-            </div>
-
-        </div>
-    </section>
-    <section class="model-explanation-section">
-    <div class="model-content">
-        <div class="section-header">
+    <div class="lockbar">
+        <div class="lockbar-text">
             <div>
-                <span class="section-eyebrow">05 &middot; How It Works</span>
-                <h2 class="section-title">How Our Model Works</h2>
-                <p class="section-subtitle">Advanced machine learning trained on thousands of games</p>
+                <h4>Full top 25 for both sports</h4>
+                <p>Every rated team, ordered by rating, updated as results come in.</p>
             </div>
         </div>
+        <div class="lockbar-actions">
+            <a href="/rankings" class="btn btn-line">Open power rankings</a>
+        </div>
+    </div>
+</section>
 
-        <div class="model-steps">
-            <!-- Step 1 -->
-            <div class="model-step">
-                <div class="step-icon">{{ icon_chart() }}</div>
-                <div class="step-content">
-                    <h3 class="step-title">1. Data Collection</h3>
-                    <p class="step-description">
-                        We analyze 2,000+ games worth of comprehensive statistics and game outcomes. We include offensive efficiency,
-                        defensive ratings, turnover ratios, and advanced metrics for every FBS or D1 team.
-                    </p>
-                </div>
+
+{# --- MODEL HIGHLIGHTS (only when curated entries exist) ----------------- #}
+{% if highlights %}
+<section class="wrap band band-tight reveal">
+    <div class="shead"><div class="shead-titles"><span class="eyebrow">Notable calls</span><h2>From the season so far</h2></div></div>
+    <div class="steps">
+        {% for h in highlights %}
+        <div class="step">
+            <div class="step-n">{{ h.sport|upper }}</div>
+            <p style="grid-column: 2 / -1">{{ h.text }}</p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+
+{# --- HOW IT WORKS ------------------------------------------------------- #}
+<section class="wrap band reveal" id="how">
+    <div class="shead">
+        <div class="shead-titles">
+            <span class="eyebrow">Method</span>
+            <h2>How a rating becomes a prediction</h2>
+        </div>
+    </div>
+
+    <div class="steps">
+        <div class="step">
+            <div class="step-n">01</div>
+            <h3>Collect the season</h3>
+            <div>
+                <p>Every completed game is pulled from the college football and basketball data APIs:
+                   final scores, schedule, venue and, where posted, the market line. Football rates FBS and
+                   FCS teams on the same scale, because a large share of FBS games are played against FCS
+                   opponents and those results only mean something if both sides carry a real rating.</p>
             </div>
-
-            <!-- Step 2 -->
-            <div class="model-step">
-                <div class="step-icon">{{ icon_brain() }}</div>
-                <div class="step-content">
-                    <h3 class="step-title">2. Machine Learning</h3>
-                    <p class="step-description">
-                        Our regression model weighs dozens of factors to calculate team strength ratings.
-                        The algorithm learns optimal weights from historical performance to maximize prediction accuracy. These weights learn from every game that is played.
-                    </p>
-                </div>
+        </div>
+        <div class="step">
+            <div class="step-n">02</div>
+            <h3>Fit a rating to each team</h3>
+            <div>
+                <p>A ridge regression fits one rating per team to the season's scoring margins, so a team's
+                   number reflects who it played as well as by how much it won. Early in the season there is
+                   little to fit on, so the regression is pulled toward a preseason projection built from the
+                   team's own final rating last season and a published preseason rating.</p>
+                <p>As games accumulate, the weight on this season's results grows and the prior fades.</p>
             </div>
-
-            <!-- Step 3 -->
-            <div class="model-step">
-                <div class="step-icon">{{ icon_bolt() }}</div>
-                <div class="step-content">
-                    <h3 class="step-title">3. Prediction Generation</h3>
-                    <p class="step-description">
-                        For each matchup, the model considers team ratings, statistical differentials,
-                        home court advantage, and neutral site factors to predict the margin and win probability.
-                        The model outputs the predicted winner, point margin along with the edge versus the vegas line
-                    </p>
-                </div>
+        </div>
+        <div class="step">
+            <div class="step-n">03</div>
+            <h3>Project the game</h3>
+            <div>
+                <p>The difference between two ratings, plus home advantage where it applies, is the projected
+                   margin. That margin converts to a win probability for each side.</p>
+                <p>Where a sportsbook has posted a line, the model's number is compared against it. The gap
+                   between the two is the edge &mdash; not a claim that the model is right, but a measure of
+                   where it disagrees most with the market.</p>
             </div>
         </div>
     </div>
-    </section>
+</section>
 
-    <section class="pricing-section" id="get-started">
-        <div class="pricing-content">
-            <span class="section-eyebrow" style="display:block;text-align:center;">06 &middot; Get Started</span>
-            <h2 class="section-title centered">Free During Beta</h2>
-            <p class="section-subtitle" style="text-align:center;">No payment, no trial period. Create an account for full access.</p>
 
-            <div class="pricing-card">
-                <div class="pricing-header">
-                    <h3 class="pricing-title">Full Access</h3>
-                    <div class="pricing-price">
-                        <span class="price-amount">Free</span>
-                    </div>
-                </div>
-                <div class="pricing-features">
-                    <div class="pricing-feature">
-                        <svg class="check-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                        <span>All daily predictions (Football & Basketball)</span>
-                    </div>
-                    <div class="pricing-feature">
-                        <svg class="check-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                        <span>Full rankings and analytics</span>
-                    </div>
-                    <div class="pricing-feature">
-                        <svg class="check-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                        <span>Custom matchup predictor</span>
-                    </div>
-                    <div class="pricing-feature">
-                        <svg class="check-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                        <span>Edge detection & confidence ratings</span>
-                    </div>
-                </div>
-                <div class="pricing-cta">
-                    <a href="/login?tab=signup" class="btn btn-large btn-primary">Create Free Account</a>
-                </div>
-            </div>
+{% endblock %}
 
-            <div class="payment-steps">
-                <h4>How to Get Started</h4>
-                <div class="steps-grid">
-                    <div class="step">
-                        <div class="step-number">1</div>
-                        <div class="step-content">
-                            <h5>Create Account</h5>
-                            <p>Sign up with your email</p>
-                        </div>
-                    </div>
-                    <div class="step">
-                        <div class="step-number">2</div>
-                        <div class="step-content">
-                            <h5>Log In</h5>
-                            <p>No payment required</p>
-                        </div>
-                    </div>
-                    <div class="step">
-                        <div class="step-number">3</div>
-                        <div class="step-content">
-                            <h5>Get Full Access</h5>
-                            <p>Predictions unlock instantly</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
 
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-grid">
-                <div class="footer-brand">
-                    <div class="footer-logo-section">
-                        <img src="{{ url_for('static', filename='favicon.png') }}" alt="Logo" class="footer-logo">
-                        <div class="footer-brand-name">Statalysts</div>
-                    </div>
-                    <p class="footer-description">
-                        Advanced AI-powered sports analytics and predictions for college football and basketball.
-                    </p>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Product</h4>
-                    <div class="footer-links">
-                        {% if user_logged_in %}
-                        <a href="/football">Football</a>
-                        <a href="/basketball">Basketball</a>
-                        <a href="/matchup">Matchup</a>
-                        <a href="/rankings">Rankings</a>
-                        {% else %}
-                        <a href="#predictions-preview">Predictions</a>
-                        <a href="#rankings-preview">Rankings</a>
-                        {% endif %}
-                        <a href="#get-started">Get Started</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Company</h4>
-                    <div class="footer-links">
-                        <a href="mailto:contact@statalysts.com">contact@statalysts.com</a>
-                        <a href="/terms">Terms & Conditions</a>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="footer-section-title">Account</h4>
-                    <div class="footer-links">
-                        {% if user_logged_in %}
-                        <a href="/logout">Log Out</a>
-                        {% else %}
-                        <a href="/login">Log In</a>
-                        <a href="/login">Sign Up</a>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <div>&copy; 2026 Statalysts. All rights reserved.</div>
-                <div class="footer-legal">
-                    <span>For entertainment purposes only. This is not advice and should just be used as a reference.</span>
-                </div>
-            </div>
-        </div>
-    </footer>
+{% block scripts %}
+{{ board_script() }}
+<script>
+(function () {
+    /* Rankings sport toggle */
+    var seg = document.getElementById('rank-seg');
+    if (!seg) return;
+    var thumb = document.getElementById('rank-thumb');
+    var buttons = Array.prototype.slice.call(seg.querySelectorAll('button'));
 
-    {{ table_expand_script() }}
-    <script>
-        document.querySelectorAll('.rank-tab').forEach(function(tab) {
-            tab.addEventListener('click', function() {
-                var sport = tab.dataset.sport;
-                document.querySelectorAll('.rank-tab').forEach(function(t) {
-                    var on = t === tab;
-                    t.classList.toggle('active', on);
-                    t.setAttribute('aria-selected', on ? 'true' : 'false');
-                });
-                document.querySelectorAll('.rank-panel').forEach(function(panel) {
-                    panel.hidden = panel.dataset.sport !== sport;
-                });
+    function place(btn) {
+        if (!thumb) return;
+        thumb.style.width = btn.offsetWidth + 'px';
+        thumb.style.transform = 'translateX(' + (btn.offsetLeft - 3) + 'px)';
+    }
+
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            buttons.forEach(function (b) { b.classList.toggle('on', b === btn); });
+            document.querySelectorAll('[data-rankpanel]').forEach(function (panel) {
+                panel.hidden = panel.dataset.rankpanel !== btn.dataset.sport;
+            });
+            place(btn);
+            /* Bars in a panel that was hidden have no measured width yet. */
+            document.querySelectorAll('[data-rankpanel]:not([hidden]) [data-w]').forEach(function (el) {
+                el.style.width = el.getAttribute('data-w') + '%';
             });
         });
-
-    // Set width for confidence bars
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('.confidence-fill').forEach(function(el) {
-            var width = el.getAttribute('data-width');
-            if (width) {
-                el.style.width = width + '%';
-            }
-        });
     });
-    </script>
-</body>
-</html>
+
+    requestAnimationFrame(function () { place(buttons[0]); });
+    window.addEventListener('resize', function () {
+        var on = seg.querySelector('button.on');
+        if (on) place(on);
+    });
+})();
+</script>
+{% endblock %}
