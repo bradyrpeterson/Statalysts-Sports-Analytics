@@ -170,7 +170,16 @@ def clean_predictions(predictions_df):
         predictions_df[column] = predictions_df[column].apply(
             lambda x: None if pd.isna(x) else x
         )
-    return predictions_df.to_dict('records')
+    rows = predictions_df.to_dict('records')
+    #AP ranks are football-only, and a column holding ranks and Nones comes back
+    #from pandas as floats -- an unranked team would render as "nan" beside its
+    #name and a ranked one as "3.0". Fixed on the records rather than on the
+    #frame, because assigning None into a float column just puts NaN back.
+    for row in rows:
+        for column in ('home_rank', 'away_rank'):
+            if column in row:
+                row[column] = None if pd.isna(row[column]) else int(row[column])
+    return rows
 
 
 def conference_options(predictor, fallback):
@@ -507,6 +516,10 @@ def football():
 
         week = request.args.get("week", str(football_predictor.next_week))
         conference = request.args.get("conference", "All")
+        #"any" = at least one AP Top 25 team, "both" = ranked vs ranked.
+        ranked = request.args.get("ranked", "All")
+        if ranked not in ("any", "both"):
+            ranked = "All"
 
         week_param = None
         if week == "bowl":
@@ -519,7 +532,8 @@ def football():
 
         predictions_df = football_predictor.get_upcoming_predictions(
             week=week_param,
-            conference=conference if conference != "All" else None
+            conference=conference if conference != "All" else None,
+            ranked=ranked if ranked != "All" else None
         )
 
         return render_template('football.html',
@@ -529,6 +543,8 @@ def football():
                              next_week=football_predictor.next_week,
                              conferences=conference_options(football_predictor, football_conferences),
                              selected_conference=conference,
+                             selected_ranked=ranked,
+                             ap_poll_week=getattr(football_predictor, 'ap_poll_week', None),
                              team_logos=football_logos,
                              team_colors=football_colors,
                              model_fully_trained=football_predictor.model_fully_trained,
@@ -544,6 +560,8 @@ def football():
                              next_week=getattr(football_predictor, 'next_week', 1) if FOOTBALL_AVAILABLE else 1,
                              selected_week=str(getattr(football_predictor, 'next_week', 1)) if FOOTBALL_AVAILABLE else "1",
                              selected_conference="All",
+                             selected_ranked="All",
+                             ap_poll_week=None,
                              team_logos=football_logos,
                              team_colors=football_colors,
                              model_fully_trained=getattr(football_predictor, 'model_fully_trained', True) if FOOTBALL_AVAILABLE else True,

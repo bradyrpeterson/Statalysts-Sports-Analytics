@@ -749,6 +749,17 @@ table { border-collapse: collapse; width: 100%; }
     text-overflow: ellipsis;
 }
 .side.picked .side-name { color: var(--bone); font-weight: 600; }
+/* AP Top 25 number. Sits between crest and name, tightened up so it reads as a
+   prefix on the team rather than a column of its own. */
+.side-rank {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--bone-4);
+    flex: none;
+    margin-right: calc(var(--s2) * -1 + 2px);
+}
+.side.picked .side-rank { color: var(--bone-2); }
 .side-rec { font-family: var(--mono); font-size: 0.6875rem; color: var(--bone-4); flex: none; }
 .side-score { font-family: var(--mono); font-size: 1rem; color: var(--bone-2); margin-left: auto; flex: none; }
 .cell-when {
@@ -824,6 +835,7 @@ span.detail-crest { display: block; }
     line-height: 1;
 }
 .detail-name { font-size: 0.875rem; color: var(--bone-3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-rank { font-family: var(--mono); font-size: 0.75rem; color: var(--bone-4); }
 
 .donut { width: 150px; height: 150px; flex: none; }
 .donut-cap {

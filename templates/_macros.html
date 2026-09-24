@@ -10,10 +10,12 @@
 {% set DONUT_CIRC = 282.743 %}
 
 
-{# One side of a matchup: crest, name, and whatever extras the sport carries. #}
-{% macro side(team, logos, picked=false, record=none, score=none) %}
+{# One side of a matchup: crest, name, and whatever extras the sport carries.
+   `rank` is the AP Top 25 number — football only, and only for ranked teams. #}
+{% macro side(team, logos, picked=false, record=none, score=none, rank=none) %}
 <div class="side {{ 'picked' if picked }}">
     {% if logos.get(team) %}<img src="{{ logos[team] }}" class="crest" alt="" loading="lazy">{% else %}<span class="crest-blank"></span>{% endif %}
+    {% if rank %}<span class="side-rank" title="AP Top 25">{{ rank }}</span>{% endif %}
     <span class="side-name">{{ team }}</span>
     {% if record %}<span class="side-rec">{{ record }}</span>{% endif %}
     {% if score is not none %}<span class="side-score fig">{{ score }}</span>{% endif %}
@@ -71,8 +73,8 @@
             data-day="{{ pred.game_date_display or 'Date TBD' }}">
             <td role="cell">
                 <div class="cell-matchup">
-                    {{ side(pred.away, team_logos, pred.predicted_winner == pred.away, pred.away_record) }}
-                    {{ side(pred.home, team_logos, pred.predicted_winner == pred.home, pred.home_record) }}
+                    {{ side(pred.away, team_logos, pred.predicted_winner == pred.away, pred.away_record, rank=pred.away_rank) }}
+                    {{ side(pred.home, team_logos, pred.predicted_winner == pred.home, pred.home_record, rank=pred.home_rank) }}
                     {% if pred.game_date_display or pred.neutral_site %}
                     <div class="cell-when">
                         {%- if pred.game_date_display %}{{ pred.game_date_display }}{% if pred.game_time_display %} &middot; {{ pred.game_time_display }}{% endif %}{% endif -%}
@@ -111,13 +113,13 @@
                         <div class="detail-side">
                             {% if team_logos.get(pred.away) %}<img src="{{ team_logos[pred.away] }}" class="detail-crest" alt="" loading="lazy">{% else %}<span class="detail-crest"></span>{% endif %}
                             <span class="detail-pct">{{ away_pct|round(1) }}%</span>
-                            <span class="detail-name">{{ pred.away }}</span>
+                            <span class="detail-name">{% if pred.away_rank %}<span class="detail-rank">{{ pred.away_rank }}</span> {% endif %}{{ pred.away }}</span>
                         </div>
                         {{ donut(pred.away, pred.home, away_pct, home_pct, team_colors) }}
                         <div class="detail-side r">
                             {% if team_logos.get(pred.home) %}<img src="{{ team_logos[pred.home] }}" class="detail-crest" alt="" loading="lazy">{% else %}<span class="detail-crest"></span>{% endif %}
                             <span class="detail-pct">{{ home_pct|round(1) }}%</span>
-                            <span class="detail-name">{{ pred.home }}</span>
+                            <span class="detail-name">{% if pred.home_rank %}<span class="detail-rank">{{ pred.home_rank }}</span> {% endif %}{{ pred.home }}</span>
                         </div>
                     </div>
 

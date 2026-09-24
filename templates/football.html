@@ -14,7 +14,8 @@
             <h1>{% if selected_week == 'bowl' %}Bowl season{% elif selected_week and selected_week != 'All' %}Week {{ selected_week }}{% else %}The board{% endif %}</h1>
             <p>Projected margin and win probability for every game on the slate, set against the posted
                market line. Sort by edge to put the widest disagreements on top, or by kickoff to read
-               the week in order.</p>
+               the week in order.{% if ap_poll_week %} Ranked teams carry their number from the week
+               {{ ap_poll_week }} AP Top 25.{% endif %}</p>
         </div>
     </div>
 </section>
@@ -38,6 +39,14 @@
                     {% for conf in conferences %}
                     <option value="{{ conf }}" {% if conf == selected_conference %}selected{% endif %}>{{ conf }}</option>
                     {% endfor %}
+                </select>
+            </label>
+            <label class="field">
+                <span class="field-label">Poll</span>
+                <select class="select" id="ranked-select">
+                    <option value="All" {% if selected_ranked == 'All' %}selected{% endif %}>All games</option>
+                    <option value="any" {% if selected_ranked == 'any' %}selected{% endif %}>AP Top 25 team</option>
+                    <option value="both" {% if selected_ranked == 'both' %}selected{% endif %}>Ranked vs ranked</option>
                 </select>
             </label>
         </div>
@@ -66,7 +75,7 @@
     <div class="empty">
         {{ icon_empty() }}
         <h3>Nothing scheduled</h3>
-        <p>No games match this week and conference. Try another week, or check back closer to kickoff.</p>
+        <p>No games match these filters.{% if selected_ranked != 'All' %} {{ 'Ranked-against-ranked matchups are rare in any single week' if selected_ranked == 'both' else 'No AP Top 25 team is on this slate' }} — try widening the poll filter.{% else %} Try another week, or check back closer to kickoff.{% endif %}</p>
     </div>
     {% else %}
     {{ slate_board(predictions, team_logos, 'board', team_colors=team_colors, high_edge=5, medium_edge=3) }}
@@ -82,15 +91,18 @@
 (function () {
     var week = document.getElementById('week-select');
     var conf = document.getElementById('conf-select');
+    var ranked = document.getElementById('ranked-select');
 
     function go() {
         var params = new URLSearchParams();
         if (week) params.set('week', week.value);
         if (conf) params.set('conference', conf.value);
+        if (ranked && ranked.value !== 'All') params.set('ranked', ranked.value);
         window.location.href = '/football?' + params.toString();
     }
     if (week) week.addEventListener('change', go);
     if (conf) conf.addEventListener('change', go);
+    if (ranked) ranked.addEventListener('change', go);
 
     /* ---- Sorting. Rows and their detail rows move together. ---- */
     var table = document.getElementById('board');

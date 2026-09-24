@@ -104,6 +104,10 @@ HTTP_TIMEOUT_SECONDS = 30
 #week for the rest of the season.
 STALE_UNPLAYED_GAME_DAYS = 3
 
+#CFBD's /rankings serves every poll it carries for every week -- coaches, FCS,
+#D-II, D-III -- so the AP one has to be picked out by name.
+AP_POLL_NAME = "AP Top 25"
+
 #Betting lines per (week, season_type), fetched once and then reused until the next
 #data refresh empties it -- page views no longer each make their own CFBD call.
 _lines_cache = {}
@@ -200,6 +204,31 @@ def _rated_games(df):
     return df[df["homeClassification"].isin(RATED_DIVISIONS) & df["awayClassification"].isin(RATED_DIVISIONS)]
 
 
+def _latest_ap_poll(poll_weeks):
+    """team -> AP Top 25 rank from the most recently released AP poll, and the week
+    it came from.
+
+    CFBD hands back every poll for every week in no particular order, so the AP one
+    has to be picked out by name and the newest week chosen explicitly. A postseason
+    poll (the final one, after the bowls) beats any regular-season week.
+    """
+    best = None
+    best_key = None
+    for poll_week in poll_weeks:
+        season_type = getattr(poll_week.season_type, "value", poll_week.season_type)
+        ap = next((p for p in poll_week.polls if p.poll == AP_POLL_NAME), None)
+        if ap is None:
+            continue
+        key = (1 if season_type == "postseason" else 0, poll_week.week)
+        if best_key is None or key > best_key:
+            best_key, best = key, ap
+
+    if best is None:
+        return {}, None
+    ranks = {r.school: r.rank for r in best.ranks if r.rank is not None}
+    return ranks, best_key[1]
+
+
 def _divisions(df):
     """team -> 'fbs'/'fcs' as recorded on that season's games."""
     out = {}
@@ -233,6 +262,14 @@ def load_data():
             print(f"Error fetching SP+ ratings: {e}")
             sp_plus = []
 
+        #AP Top 25. Purely presentational -- it is shown beside ranked teams and
+        #drives the ranked-matchups filter, and never feeds the ratings.
+        try:
+            poll_weeks = cfbd.RankingsApi(api_client).get_rankings(year=2026, _request_timeout=HTTP_TIMEOUT_SECONDS)
+        except Exception as e:
+            print(f"Error fetching AP poll: {e}")
+            poll_weeks = []
+
         #Last season's own completed games -- the other half of the preseason
         #prior (see PRESEASON PRIOR at the top of this file).
         try:
@@ -240,6 +277,8 @@ def load_data():
         except Exception as e:
             print(f"Error fetching last season's games: {e}")
             last_season_games = []
+
+    ap_rankings, ap_poll_week = _latest_ap_poll(poll_weeks)
 
     #Map venue id -> "City, State" so game locations can be shown alongside the venue name
     venue_location = {}
@@ -341,6 +380,8 @@ def load_data():
         "preseason_rating": preseason_rating,
         "home_field": home_field,
         "FBS_rankings": FBS_rankings,
+        "ap_rankings": ap_rankings,
+        "ap_poll_week": ap_poll_week,
         "weeks_completed": weeks_completed,
         "model_fully_trained": model_fully_trained,
         #Lines move through the week, so the cache starts over with each refresh.
@@ -473,7 +514,7 @@ def calculate_edge_highlight(model_margin, betting_spread):
     else:
         return None
 
-def get_upcoming_predictions(week=None,conference=None):
+def get_upcoming_predictions(week=None, conference=None, ranked=None):
     # Use the upcoming games dataset (no scores yet)
     games_to_predict = upcoming.copy()
 
@@ -491,6 +532,14 @@ def get_upcoming_predictions(week=None,conference=None):
         games_to_predict = games_to_predict[
             (games_to_predict["homeConference"] == conference) |
             (games_to_predict["awayConference"] == conference)
+        ]
+    #Filter by AP Top 25. "any" keeps games with a ranked team on either side,
+    #"both" keeps only ranked-vs-ranked. Anything else means no poll filter.
+    if ranked in ("any", "both"):
+        home_ranked = games_to_predict["homeTeam"].isin(ap_rankings)
+        away_ranked = games_to_predict["awayTeam"].isin(ap_rankings)
+        games_to_predict = games_to_predict[
+            (home_ranked & away_ranked) if ranked == "both" else (home_ranked | away_ranked)
         ]
     # Fetch betting lines for this week
     if postseason:
@@ -564,6 +613,9 @@ def get_upcoming_predictions(week=None,conference=None):
                 "away": away,
                 "home_record": "%d-%d" % records.get(home, (0, 0)),
                 "away_record": "%d-%d" % records.get(away, (0, 0)),
+                #AP Top 25 rank, or None for an unranked team.
+                "home_rank": ap_rankings.get(home),
+                "away_rank": ap_rankings.get(away),
                 "predicted_winner": winner,
                 "margin": round(abs(margin), 2),
                 "prob": round(prob * 100, 1) if margin > 0 else round((1 - prob) * 100, 1),
