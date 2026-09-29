@@ -5,6 +5,7 @@ Firestore collection: tracked_picks
 Doc id: {sport}_{date}_{home}_{away}  (deterministic -> idempotent snapshotting)
 """
 import math
+import traceback
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -145,6 +146,7 @@ def _basketball_finals_for_date(headers, date_str):
 def snapshot_todays_picks(db, football_predictor=None, basketball_predictor=None):
     """Log any not-yet-seen upcoming picks as pending tracked_picks docs."""
     saved = 0
+    relined = 0
     horizon = (
         datetime.now(pytz.timezone("America/New_York")).date() + timedelta(days=SNAPSHOT_HORIZON_DAYS)
     ).isoformat()
@@ -153,7 +155,18 @@ def snapshot_todays_picks(db, football_predictor=None, basketball_predictor=None
         if predictor is None:
             continue
         try:
-            predictions_df = predictor.get_upcoming_predictions()
+            #Football is asked for one week -- the one whose betting lines were fetched.
+            #Called with no week, get_upcoming_predictions returns every remaining
+            #regular-season game but still fetches lines for next_week alone, so games
+            #from later weeks came back with no line and no edge, and the doc-id guard
+            #below meant they were never looked at again. Asking for next_week keeps the
+            #game filter and the line fetch on the same week, and is the cheaper call.
+            #Basketball takes no week and only ever returns today's slate, so it cannot
+            #run ahead of its own lines.
+            if sport == "football":
+                predictions_df = predictor.get_upcoming_predictions(week=predictor.next_week)
+            else:
+                predictions_df = predictor.get_upcoming_predictions()
         except Exception as e:
             print(f"[tracking] Error getting {sport} predictions to snapshot: {e}")
             continue
@@ -167,8 +180,20 @@ def snapshot_todays_picks(db, football_predictor=None, basketball_predictor=None
 
             doc_id = _doc_id(sport, date, pick["home"], pick["away"])
             doc_ref = db.collection("tracked_picks").document(doc_id)
-            if doc_ref.get().exists:
-                continue
+            existing = doc_ref.get()
+            created_at = None
+            if existing.exists:
+                prior = existing.to_dict() or {}
+                #A pick with no line has no edge, so it was never recommended and never
+                #actionable -- re-snapshotting it while its game is still pending is what
+                #gives it one, and recovers a week that was captured before its lines
+                #existed. A pick that already has a line, or has been settled, keeps the
+                #numbers it was frozen with: that is the point of snapshotting.
+                if prior.get("status") != "pending" or prior.get("betting_spread") is not None:
+                    continue
+                #First-seen time is preserved so a re-snapshot doesn't look like a new pick.
+                created_at = prior.get("created_at")
+                relined += 1
 
             betting_spread = _number_or_none(pick.get("betting_spread"))
             spread_diff = _number_or_none(pick.get("spread_diff"))
@@ -205,9 +230,11 @@ def snapshot_todays_picks(db, football_predictor=None, basketball_predictor=None
                 "season_type": pick.get("season_type"),
                 "status": "pending",
                 "source": "live",
-                "created_at": datetime.now(timezone.utc),
+                "created_at": created_at or datetime.now(timezone.utc),
             })
             saved += 1
+    if relined:
+        print(f"[tracking] Re-snapshotted {relined} pick(s) that had been captured before their lines existed")
     return saved
 
 
@@ -249,7 +276,11 @@ def settle_pending_picks(db, football_predictor=None, basketball_predictor=None)
         for date_str in {d["date"] for _, d in due if d["sport"] == "basketball"}:
             basketball_finals[date_str] = _basketball_finals_for_date(headers["basketball"], date_str)
     except Exception as e:
-        print(f"[tracking] Error fetching final scores: {e}")
+        #This used to print str(e) alone and return 0, which job_state recorded exactly
+        #as it records "nothing was due" -- a run that failed to reach CFBD looked
+        #identical to a quiet one. The repr carries the HTTP status for a raise_for_status.
+        print(f"[tracking] Error fetching final scores: {e!r}")
+        traceback.print_exc()
         return 0
 
     for doc, data in due:
