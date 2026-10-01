@@ -9,3 +9,7 @@ research/model_backtest/data/
 # Per-game backtest output; the summary CSVs alongside them are kept
 research/model_backtest/results/*_detail.csv
 .python-version
+.DS_Store
+# Claude Code's local scratch, including its git worktrees -- a stale gitlink to
+# one of those had been committed by accident and is removed from the index.
+.claude/

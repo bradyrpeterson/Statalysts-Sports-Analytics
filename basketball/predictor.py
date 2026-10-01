@@ -112,9 +112,10 @@ def load_data():
     #Convert the API response into a json then a dataframe for easy use
     games_response = requests.get(games_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
     games_response.raise_for_status()
-    games_data = games_response.json()
-    games_df = pd.DataFrame(games_data)
-    games_df = games_df[needed_cols].copy()
+    #Only the columns the model reads, selected as the frame is built. Building a
+    #full-width frame first and narrowing it afterwards materialised every field
+    #CBBD sends for every game in the season, most of them never looked at.
+    games_df = pd.DataFrame(games_response.json(), columns=needed_cols)
 
     #Only care about games where one of the teams was D1
     games_df = games_df[games_df["homeTeam"].isin(d1_teams) | games_df["awayTeam"].isin(d1_teams)].reset_index(drop=True)
@@ -125,8 +126,8 @@ def load_data():
     #Upcoming games = scheduled but not yet played
     upcoming = games_df[(games_df["status"] != "final")].reset_index(drop=True)
 
-    #Create the margin column in completed
-    completed = completed.copy()
+    #Create the margin column in completed. reset_index above already returned a
+    #frame of its own, so this needs no further copy of the season.
     completed["margin"] = completed["homePoints"] - completed["awayPoints"]
 
     #Using requests pull all the statistical data from the data set
@@ -166,29 +167,31 @@ def load_data():
     teams = sorted(set(df["homeTeam"]).union(df["awayTeam"]))
     #Home teams get a +1 value and -1 is for away
     #This setup allows for the regression to assign each team a numeric rating
+    #Built directly as the float64 array LinearRegression converts its input to
+    #anyway, with home court as the last column. A full season is roughly 3000
+    #games against 725 teams, and routing that through a DataFrame made three more
+    #copies of it in a row: the int64 matrix, the frame wrapping it, and a
+    #whole-frame copy from fillna(). fillna() had nothing to do either -- the
+    #matrix starts as zeros and every team in `teams` comes from these same two
+    #columns, so no cell is ever null. Same estimator, same column order.
     team_col = {t: i for i, t in enumerate(teams)}
     rows = np.arange(len(df))
-    matrix = np.zeros((len(df), len(teams)), dtype=np.int64)
-    matrix[rows, df["homeTeam"].map(team_col).to_numpy()] = 1    # +1 for home team
-    matrix[rows, df["awayTeam"].map(team_col).to_numpy()] = -1   # -1 for away team
-    X = pd.DataFrame(matrix, columns=teams)
-
+    X = np.zeros((len(df), len(teams) + 1), dtype=np.float64)
+    X[rows, df["homeTeam"].map(team_col).to_numpy()] = 1.0    # +1 for home team
+    X[rows, df["awayTeam"].map(team_col).to_numpy()] = -1.0   # -1 for away team
     #Add home court column
-    X["home_court"] = 1
-
-    X = X.fillna(0)
+    X[:, -1] = 1.0
 
     #Time to fit the margin
-    y = df["margin"]
+    y = df["margin"].to_numpy(dtype=np.float64)
 
     #Create the linear regression based on the margins
     model = LinearRegression(fit_intercept=False)
     model.fit(X, y)
 
     #Ensure home field is counted for in the team ratings
-    coefs = pd.Series(model.coef_, index=X.columns)
-    home_court = coefs["home_court"]
-    ratings = coefs.drop("home_court")
+    home_court = model.coef_[-1]
+    ratings = pd.Series(model.coef_[:-1], index=teams)
     #Make the average team=0
     ratings -= ratings.mean()
 
@@ -250,12 +253,6 @@ def predict_game(home, away, neutral_site=False):
 
     #Whether or not home court advntage is applied
     home_advantage = 0 if neutral_site else 1
-    #Different weights of each
-    #w_rating=0.7
-    #w_oeff=0.125
-   # w_deff=0.125
-    #w_tov=0.05
-    #margin=(w_rating*rating_diff+(w_oeff*oeff_diff)+(w_deff*deff_diff)+(w_tov*turnover_diff)+home_advantage)
     features = np.array([[
         rating_diff,
         oeff_diff,

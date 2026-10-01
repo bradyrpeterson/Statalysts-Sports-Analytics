@@ -112,6 +112,34 @@ AP_POLL_NAME = "AP Top 25"
 #data refresh empties it -- page views no longer each make their own CFBD call.
 _lines_cache = {}
 
+#Two of the five CFBD calls a refresh makes return data that cannot have changed
+#since the last one: last season's completed games, and the venue list. Together
+#they were 3.1 MB of the 5.9 MB each hourly refresh pulled -- 52% of it re-fetched
+#and re-fitted for an identical result.
+#
+#They are held for a day rather than for the life of the process. A completed
+#season really is immutable, but CFBD does occasionally correct an old score or add
+#a venue, and a day bounds how long we would carry a stale copy while still cutting
+#these two calls to 1/24th of what they were. Everything that moves during a season
+#-- this year's games, SP+, the AP poll, betting lines -- is untouched by this and
+#is still fetched on every refresh.
+IMMUTABLE_CACHE_SECONDS = 86400
+_immutable_cache = {}
+
+
+def _cached_for_a_day(key, build):
+    """build()'s result, reused for IMMUTABLE_CACHE_SECONDS. Only for payloads whose
+    value does not change between refreshes -- see IMMUTABLE_CACHE_SECONDS above.
+
+    A failure is not cached, so the next refresh retries rather than inheriting a
+    gap for the rest of the day."""
+    hit = _immutable_cache.get(key)
+    if hit is not None and (time.monotonic() - hit[0]) < IMMUTABLE_CACHE_SECONDS:
+        return hit[1]
+    value = build()
+    _immutable_cache[key] = (time.monotonic(), value)
+    return value
+
 
 def _fit_team_ratings(games_df):
     """Home/away indicator regression on margin -- same method used for both
@@ -120,24 +148,25 @@ def _fit_team_ratings(games_df):
     if len(games_df) == 0:
         return pd.Series(dtype=float), 0.0
 
-    #Build the design matrix
+    #Build the design matrix: one column per team, home field last. Built directly
+    #as the float64 array LinearRegression converts its input to anyway -- the
+    #int64 matrix and the DataFrame wrapping it were two extra full copies of it.
+    #Same estimator, same column order, same coefficients.
     teams_in = sorted(set(games_df["homeTeam"]).union(games_df["awayTeam"]))
     #Home teams get a +1 value and -1 is for away
     #This setup allows for the regression to assign each team a numeric rating
     team_col = {t: i for i, t in enumerate(teams_in)}
     rows = np.arange(len(games_df))
-    matrix = np.zeros((len(games_df), len(teams_in)), dtype=np.int64)
-    matrix[rows, games_df["homeTeam"].map(team_col).to_numpy()] = 1    # +1 for home team
-    matrix[rows, games_df["awayTeam"].map(team_col).to_numpy()] = -1   # -1 for away team
-    X = pd.DataFrame(matrix, columns=teams_in)
-
+    X = np.zeros((len(games_df), len(teams_in) + 1), dtype=np.float64)
+    X[rows, games_df["homeTeam"].map(team_col).to_numpy()] = 1.0    # +1 for home team
+    X[rows, games_df["awayTeam"].map(team_col).to_numpy()] = -1.0   # -1 for away team
     #Add home field column
-    X["home_field"] = 1
+    X[:, -1] = 1.0
 
     #Time to fit the margin
     #The regressions finds coefficients that best fit the margins
     #Don't worry about an intercept cause we have home field
-    y = games_df["margin"].reset_index(drop=True)
+    y = games_df["margin"].to_numpy(dtype=np.float64)
 
     #Create the linear regression based on the margins
     #Essentially finds a set of ratings that makes the predicted scores as close
@@ -151,9 +180,8 @@ def _fit_team_ratings(games_df):
     #Every team gets a numeric rating
     #home_field isolates the average value that being at home bears
     #Substrating the mean centers the ratings at 0 so the average team has that rating
-    coefs = pd.Series(model.coef_, index=X.columns)
-    hf = coefs["home_field"]
-    r = coefs.drop("home_field")
+    hf = model.coef_[-1]
+    r = pd.Series(model.coef_[:-1], index=teams_in)
     #Make the average team=0
     r -= r.mean()
     return r, hf
@@ -173,13 +201,19 @@ def _fit_ridge_to_prior(games_df, prior, lam=RIDGE_TO_PRIOR_LAMBDA):
 
     teams = sorted(set(games_df["homeTeam"]).union(games_df["awayTeam"]))
     index = {t: i for i, t in enumerate(teams)}
+    #Built column-wise. The row-by-row loop this replaces went through iterrows(),
+    #which boxes every game into its own Series -- a few thousand short-lived
+    #objects per refresh, to fill in two indexed assignments.
+    rows = np.arange(len(games_df))
     X = np.zeros((len(games_df), len(teams)))
-    y = np.zeros(len(games_df))
-    for i, (_, row) in enumerate(games_df.iterrows()):
-        X[i, index[row["homeTeam"]]] = 1.0
-        X[i, index[row["awayTeam"]]] = -1.0
-        hfa = 0.0 if row.get("neutralSite", False) else HOME_FIELD_ADVANTAGE
-        y[i] = (row["homePoints"] - row["awayPoints"]) - hfa
+    X[rows, games_df["homeTeam"].map(index).to_numpy()] = 1.0
+    X[rows, games_df["awayTeam"].map(index).to_numpy()] = -1.0
+    #bool() per value, exactly as `0.0 if row.get("neutralSite", False) else HFA`
+    #did -- a missing flag stored as NaN counts as neutral, one stored as None
+    #does not.
+    hfa = np.where(games_df["neutralSite"].map(bool).to_numpy(), 0.0, HOME_FIELD_ADVANTAGE)
+    y = (games_df["homePoints"].to_numpy(dtype=np.float64)
+         - games_df["awayPoints"].to_numpy(dtype=np.float64)) - hfa
 
     #Every FBS/FCS team gets a prior entry in load_data(); this fill only covers a
     #team that turns up mid-season with no history at all.
@@ -229,6 +263,65 @@ def _latest_ap_poll(poll_weeks):
     return ranks, best_key[1]
 
 
+def _last_season_prior(api_client, year=2025):
+    """Last season's own final ratings -- the other half of the preseason prior.
+
+    Fit on every FBS and FCS game so both divisions land on one scale, then centred
+    so the average FBS team is 0. Returns (ratings, division map, FCS-to-FBS gap).
+
+    Lifted out of load_data() unchanged so its result can be cached: the season is
+    over, so re-downloading it and refitting the regression every hour produced the
+    same three values every time. See IMMUTABLE_CACHE_SECONDS.
+    """
+    last_season_games = cfbd.GamesApi(api_client).get_games(
+        year=year, _request_timeout=HTTP_TIMEOUT_SECONDS
+    )
+    #Only the columns the prior is built from; the rest of a full season's payload
+    #was being carried through the fit for nothing.
+    last_season_df = pd.DataFrame(
+        [g.to_dict() for g in last_season_games],
+        columns=["homeTeam", "awayTeam", "homePoints", "awayPoints",
+                 "homeClassification", "awayClassification"],
+    )
+    del last_season_games
+
+    last_division = {}
+    fcs_mean = 0.0
+    if len(last_season_df) > 0:
+        last_season_df = _rated_games(last_season_df)
+        last_season_df = last_season_df.dropna(subset=["homePoints", "awayPoints"]).reset_index(drop=True)
+        last_season_df["margin"] = last_season_df["homePoints"] - last_season_df["awayPoints"]
+        last_division = _divisions(last_season_df)
+    own_last_year_rating, _ = _fit_team_ratings(last_season_df)
+    if len(own_last_year_rating) > 0:
+        by_division = own_last_year_rating.groupby(own_last_year_rating.index.map(last_division)).mean()
+        fcs_mean = float(by_division.get("fcs", 0.0) - by_division.get("fbs", 0.0))
+        own_last_year_rating = own_last_year_rating - by_division.get("fbs", 0.0)
+    return own_last_year_rating, last_division, fcs_mean
+
+
+def _team_records(games_df):
+    """team -> (wins, losses) over this season's completed games.
+
+    Tallied once per refresh instead of once per page view. Every predictions page
+    showed these, and rebuilding them meant walking the whole season's results
+    through iterrows() -- boxing each game into a Series -- on every request. The
+    records only change when new scores land, which is when a refresh runs.
+    """
+    records = {}
+    for home, away, home_points, away_points in zip(
+        games_df["homeTeam"].to_numpy(),
+        games_df["awayTeam"].to_numpy(),
+        games_df["homePoints"].to_numpy(),
+        games_df["awayPoints"].to_numpy(),
+    ):
+        home_won = home_points > away_points
+        for team, won in ((home, home_won), (away, not home_won)):
+            wins, losses = records.get(team, (0, 0))
+            records[team] = (wins + 1, losses) if won else (wins, losses + 1)
+    return records
+
+
 def _divisions(df):
     """team -> 'fbs'/'fcs' as recorded on that season's games."""
     out = {}
@@ -246,12 +339,33 @@ def load_data():
         api_instance = cfbd.GamesApi(api_client)
         games = api_instance.get_games(year=2026, _request_timeout=HTTP_TIMEOUT_SECONDS)
 
-        venues_api = cfbd.VenuesApi(api_client)
+        #Each game is turned into a dictionary then into a dataframe, keeping only
+        #the columns that matter. Selecting them as the frame is built rather than
+        #narrowing a full-width one afterwards: CFBD sends about forty fields per
+        #game and the wide intermediate was the largest allocation in a refresh.
+        df = pd.DataFrame([g.to_dict() for g in games], columns=need_cols)
+        #The parsed game objects are a few MB and nothing below reads them again.
+        del games
+        #Only keep games between FBS and FCS teams
+        df = _rated_games(df).reset_index(drop=True)
+
+        #Venue list -- see IMMUTABLE_CACHE_SECONDS. Cached as the id -> "City, State"
+        #map rather than as the raw response, which is twenty times the size.
+        def fetch_venue_location():
+            #Map venue id -> "City, State" so game locations can be shown alongside the venue name
+            located = {}
+            for v in cfbd.VenuesApi(api_client).get_venues(_request_timeout=HTTP_TIMEOUT_SECONDS):
+                v = v.to_dict()
+                city_state = ", ".join(p for p in [v.get("city"), v.get("state")] if p)
+                if v.get("id") is not None and city_state:
+                    located[v["id"]] = city_state
+            return located
+
         try:
-            venues = venues_api.get_venues(_request_timeout=HTTP_TIMEOUT_SECONDS)
+            venue_location = _cached_for_a_day("venue_location", fetch_venue_location)
         except Exception as e:
             print(f"Error fetching venues: {e}")
-            venues = []
+            venue_location = {}
 
         #SP+ (Bill Connelly's advanced rating) for the current season -- this early,
         #before many/any games are played, it *is* the preseason projection. Used
@@ -270,30 +384,19 @@ def load_data():
             print(f"Error fetching AP poll: {e}")
             poll_weeks = []
 
-        #Last season's own completed games -- the other half of the preseason
-        #prior (see PRESEASON PRIOR at the top of this file).
+        #Last season's half of the preseason prior -- see IMMUTABLE_CACHE_SECONDS.
+        #The three small values the fit produces are cached, not the season itself,
+        #so the 2.9 MB download and the regression over it both happen once a day
+        #instead of hourly, and nothing holds last year's games between refreshes.
         try:
-            last_season_games = cfbd.GamesApi(api_client).get_games(year=2025, _request_timeout=HTTP_TIMEOUT_SECONDS)
+            own_last_year_rating, last_division, fcs_mean = _cached_for_a_day(
+                "last_season_prior", lambda: _last_season_prior(api_client)
+            )
         except Exception as e:
             print(f"Error fetching last season's games: {e}")
-            last_season_games = []
+            own_last_year_rating, last_division, fcs_mean = pd.Series(dtype=float), {}, 0.0
 
     ap_rankings, ap_poll_week = _latest_ap_poll(poll_weeks)
-
-    #Map venue id -> "City, State" so game locations can be shown alongside the venue name
-    venue_location = {}
-    for v in venues:
-        v = v.to_dict()
-        city_state = ", ".join(p for p in [v.get("city"), v.get("state")] if p)
-        if v.get("id") is not None and city_state:
-            venue_location[v["id"]] = city_state
-
-    #Each game is turned into a dictionary then into a dataframe
-    df = pd.DataFrame([g.to_dict() for g in games])
-    #Only keep the columns that matter
-    df = df[need_cols].copy()
-    #Only keep games between FBS and FCS teams
-    df = _rated_games(df).reset_index(drop=True)
 
     #Need to make an upcoming data frame as well as a completed data frame
     completed = df.dropna(subset=["homePoints", "awayPoints"]).reset_index(drop=True)
@@ -310,25 +413,9 @@ def load_data():
 
     #define what margin is
     #sort the dataframe to have a line of home and away teams
-    completed = completed.copy()
+    #dropna above already returned a frame of its own, so adding the column here
+    #needs no further copy of the season.
     completed["margin"] = completed["homePoints"] - completed["awayPoints"]
-
-    #Last season's own final ratings -- the other half of the preseason prior.
-    #Fit on every FBS and FCS game so both divisions land on one scale, then
-    #centred so the average FBS team is 0.
-    last_season_df = pd.DataFrame([g.to_dict() for g in last_season_games])
-    last_division = {}
-    fcs_mean = 0.0
-    if len(last_season_df) > 0:
-        last_season_df = _rated_games(last_season_df)
-        last_season_df = last_season_df.dropna(subset=["homePoints", "awayPoints"]).reset_index(drop=True)
-        last_season_df["margin"] = last_season_df["homePoints"] - last_season_df["awayPoints"]
-        last_division = _divisions(last_season_df)
-    own_last_year_rating, _ = _fit_team_ratings(last_season_df)
-    if len(own_last_year_rating) > 0:
-        by_division = own_last_year_rating.groupby(own_last_year_rating.index.map(last_division)).mean()
-        fcs_mean = float(by_division.get("fcs", 0.0) - by_division.get("fbs", 0.0))
-        own_last_year_rating = own_last_year_rating - by_division.get("fbs", 0.0)
 
     preseason_rating_sp = pd.Series(
         {t.team: t.rating for t in sp_plus if t.team in fbs_teams}
@@ -369,8 +456,8 @@ def load_data():
     model_fully_trained = weeks_completed >= MODEL_FULLY_TRAINED_MIN_WEEKS
 
     return {
-        "games": games,
         "venue_location": venue_location,
+        "team_records": _team_records(completed),
         "completed": completed,
         "upcoming": upcoming,
         "next_week": next_week,
@@ -515,8 +602,10 @@ def calculate_edge_highlight(model_margin, betting_spread):
         return None
 
 def get_upcoming_predictions(week=None, conference=None, ranked=None):
-    # Use the upcoming games dataset (no scores yet)
-    games_to_predict = upcoming.copy()
+    # Use the upcoming games dataset (no scores yet). Not copied up front: every
+    # branch below filters it, and a filter already returns a frame of its own, so
+    # the copy only duplicated the full slate before discarding most of it.
+    games_to_predict = upcoming
 
     #app.py passes "bowl" for the postseason view; anything past week 16 means the same.
     postseason = week is not None and (str(week) == "bowl" or int(week) > 16)
@@ -547,13 +636,9 @@ def get_upcoming_predictions(week=None, conference=None, ranked=None):
     else:
         betting_lines = get_betting_lines(week if week else next_week, season_type="regular")
 
-    #This season's win-loss record per team, shown alongside each matchup.
-    records = {}
-    for _, g in completed.iterrows():
-        home_won = g["homePoints"] > g["awayPoints"]
-        for team, won in ((g["homeTeam"], home_won), (g["awayTeam"], not home_won)):
-            wins, losses = records.get(team, (0, 0))
-            records[team] = (wins + 1, losses) if won else (wins, losses + 1)
+    #This season's win-loss record per team, shown alongside each matchup. Tallied
+    #once per refresh -- see _team_records.
+    records = team_records
 
     predictions = []
     for _, game in games_to_predict.iterrows():
@@ -644,7 +729,3 @@ def get_upcoming_predictions(week=None, conference=None, ranked=None):
     return pd.DataFrame(predictions)
 
 
-
-# How to print if I wasn't using the app
-#m, p = predict_game("Florida State", "Ohio State")
-#print(f"\nPredicted margin {m:.2f}, win probability {p*100:.1f}%")
