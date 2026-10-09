@@ -119,6 +119,7 @@ def ensure_loader_running():
         _predictors_loaded.clear()
         _data_status.update(football="pending", basketball="pending")
         threading.Thread(target=_keep_predictors_fresh, daemon=True).start()
+        start_tracking_scheduler()
 
 
 def require_predictors():
@@ -438,9 +439,11 @@ app.add_template_filter(colors.readable, "team_color")
 
 #Loading happens off the startup path: gunicorn kills a worker that takes longer than
 #its timeout to boot, and downloading plus fitting both models can take that long on
-#a small instance. Started again from the first request in a forked worker (see
-#ensure_loader_running).
-ensure_loader_running()
+#a small instance. It starts on the first request, never at import: under --preload
+#the import happens in the gunicorn master, and a loader started there kept a second,
+#never-used copy of both models in the master alongside the worker's (see
+#ensure_loader_running). Render's health check makes that first request within
+#seconds of boot.
 app.before_request(ensure_loader_running)
 
 @app.route("/")
@@ -848,25 +851,34 @@ def _claim_scheduler_slot():
     return lock_file
 
 
-if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-    # Guard avoids double-scheduling under Flask's debug-mode reloader (which forks a child
-    # process with WERKZEUG_RUN_MAIN=true); gunicorn in production never sets this var, so the
-    # scheduler still starts there.
-    # Module-level reference keeps the lock's file descriptor open for the process lifetime.
-    _scheduler_lock = _claim_scheduler_slot()
-    if _scheduler_lock is not None:
-        from apscheduler.schedulers.background import BackgroundScheduler
+#Module-level reference keeps the lock's file descriptor open for the process lifetime.
+_scheduler_lock = None
 
-        scheduler = BackgroundScheduler(timezone="America/New_York")
-        #misfire_grace_time keeps a run that fires late (a busy worker, a slow CFBD
-        #call on the previous job) from being dropped outright.
-        scheduler.add_job(
-            run_daily_tracking_job, "cron",
-            hour=TRACKING_JOB_HOUR, minute=0, misfire_grace_time=3600,
-        )
-        scheduler.start()
-        #Off the request path: a missed day is caught up without delaying startup.
-        threading.Thread(target=_run_tracking_job_if_missed, daemon=True).start()
+
+def start_tracking_scheduler():
+    """Schedule the daily tracking job in this process, if no other process has it.
+
+    Called from ensure_loader_running, i.e. from a process that serves requests. It
+    used to run at import, which under --preload put the scheduler (and the flock)
+    in the gunicorn master -- and since the job reads the models, the master then
+    needed a full copy of them too. That copy sat beside the worker's and pushed the
+    instance past 512 MB on the hourly refresh."""
+    global _scheduler_lock
+    _scheduler_lock = _claim_scheduler_slot()
+    if _scheduler_lock is None:
+        return
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    scheduler = BackgroundScheduler(timezone="America/New_York")
+    #misfire_grace_time keeps a run that fires late (a busy worker, a slow CFBD
+    #call on the previous job) from being dropped outright.
+    scheduler.add_job(
+        run_daily_tracking_job, "cron",
+        hour=TRACKING_JOB_HOUR, minute=0, misfire_grace_time=3600,
+    )
+    scheduler.start()
+    #Off the request path: a missed day is caught up without delaying startup.
+    threading.Thread(target=_run_tracking_job_if_missed, daemon=True).start()
 
 @app.route("/admin/settle-picks", methods=["POST"])
 def admin_settle_picks():

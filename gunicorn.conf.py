@@ -19,3 +19,9 @@ graceful_timeout = 30
 
 # No max_requests: recycling the worker threw away the loaded models and made
 # the replacement re-download and refit everything, and nothing here leaks.
+
+# Import the app in the worker, not the master. A preloaded master held its own copy
+# of both models next to the worker's. app.py no longer loads anything at import, so
+# this is belt and braces -- and a GUNICORN_CMD_ARGS="--preload" in the dashboard
+# still overrides it.
+preload_app = False
